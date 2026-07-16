@@ -1,10 +1,11 @@
-// ————— Schema dati (BRIEF §4) —————
+// ————— Schema dati (BRIEF §4, esteso v2) —————
 
 export interface EsercizioCanonico {
   id: string
   nome: string
   alias: string[]
   attrezzo: 'manubri' | 'bilanciere' | 'macchina' | 'cavo' | 'corpo'
+  custom?: boolean // creato dall'utente (modalità ospite / editor)
 }
 
 export interface Blocco {
@@ -20,7 +21,7 @@ export interface Prescrizione {
   esercizioId: string
   nomePdf: string // com'era scritto nel PDF (riferimento secondario)
   ordine: number
-  // blocchi indicizzati per settimana 1..5 (il PDF può avere 4 o 5 colonne)
+  // blocchi indicizzati per settimana 1..N (il PDF può avere 4 o 5 colonne)
   blocchi: Record<number, Blocco[]>
   rest?: number // secondi; assente = "quando ti senti pronto"
   note?: string
@@ -30,7 +31,7 @@ export interface Prescrizione {
 export interface GiornoProgramma {
   n: number
   nome: string
-  addome?: boolean // regola globale: addome prima di dorso e gambe
+  addome?: boolean
   prescrizioni: Prescrizione[]
 }
 
@@ -39,16 +40,28 @@ export interface Programma {
   nome: string
   dataInizio: string // ISO
   durataSettimane: number
-  pdfSorgente: string
+  pdfSorgente?: string
   giorni: GiornoProgramma[]
+  custom?: boolean // creato con l'editor in-app
 }
 
-// ————— Log —————
+// ————— Log v2 —————
+
+export type TipoSerie =
+  | 'riscaldamento' | 'preparatoria' | 'working' | 'top'
+  | 'backoff' | 'drop' | 'restpause' | 'parziale'
+
+// le serie che contano per volume, record e progressione
+export const TIPI_ALLENANTI: TipoSerie[] = ['working', 'top']
+
+export type Tecnica = 'pulita' | 'sporca' | 'compromessa'
 
 export interface LogSerie {
   carico: number // kg
   reps: number
-  backOff?: boolean
+  tipo: TipoSerie
+  rir?: 0 | 1 | 2 | 3 | 4 // 4 = "4+"
+  tecnica?: Tecnica
 }
 
 export interface LogEsercizio {
@@ -62,15 +75,18 @@ export interface Sessione {
   data: string // ISO date
   giornoN: number
   giornoNome: string
+  programmaId?: string
   esercizi: LogEsercizio[]
   inizio?: string // ISO datetime
   fine?: string
+  // gestione attrezzi occupati: solo ordine della seduta, la scheda non cambia
+  rimandati?: string[] // esercizioId in coda
 }
 
-// ————— Antropometria (15 parametri, BRIEF §6) —————
+// ————— Antropometria —————
 
 export interface Check {
-  data: string // ISO — data inizio piano alimentare
+  data: string
   peso: number
   bf: number
   fm: number
@@ -87,16 +103,26 @@ export interface Check {
   bmi: number // presente nei dati, MAI graficato
 }
 
-// ————— Alimentazione (l'opzione è l'unità, BRIEF §7) —————
+// ————— Alimentazione —————
 
 export type CategoriaFrequenza =
   | 'legumi' | 'pesce' | 'carne_rossa' | 'carne_bianca' | 'uova' | 'latticini' | 'affettato'
+
+export interface Macro {
+  kcal: number
+  proteine: number
+  carboidrati: number
+  grassi: number
+  fibre: number
+}
 
 export interface OpzionePasto {
   n: number
   titolo?: string
   voci: string[]
   categorie: CategoriaFrequenza[]
+  macro?: Macro // calcolati da tabelle nutrizionali, NON presenti nei PDF del coach
+  assunzioni?: string[] // convenzioni usate nel calcolo (es. "1 frutto = mela 150g")
 }
 
 export interface Pasto {
@@ -106,21 +132,48 @@ export interface Pasto {
   opzioni: OpzionePasto[]
 }
 
+// alimento per la dieta libera (macro per 100g)
+export interface Alimento {
+  nome: string
+  per100: Macro
+  custom?: boolean
+}
+
+export interface VoceLibera {
+  alimento: string
+  grammi: number
+  macro: Macro // già scalati sui grammi
+}
+
 // ————— Stato persistito —————
 
 export interface DietaGiorno {
-  pasti: Partial<Record<Pasto['id'], number>> // n opzione scelta
-  acqua: boolean // 2 litri base
-  acquaAllenamento: boolean // +1 litro se ci si allena
+  pasti: Partial<Record<Pasto['id'], number>>
+  libere?: VoceLibera[] // dieta libera (ospiti o eccezioni)
+  acqua: boolean
+  acquaAllenamento: boolean
   sgarro: boolean
   integrazioneColazione: boolean
   integrazioneCena: boolean
 }
 
+export interface Profilo {
+  ospite: boolean // true = amico: niente dati seed di Salvatore
+  nome?: string
+  dietaLibera: boolean // logging alimentare senza opzioni
+  programmaAttivoId?: string
+}
+
 export interface Stato {
-  versione: 1
+  versione: 2
+  profilo: Profilo
   sessioni: Sessione[]
   sessioneCorrente: Sessione | null
-  dieta: Record<string, DietaGiorno> // chiave = data ISO
-  incrementi: Record<string, number> // esercizioId -> kg di incremento doppia progressione
+  dieta: Record<string, DietaGiorno>
+  incrementi: Record<string, number>
+  pesate: Record<string, number> // pesata quotidiana: data ISO -> kg
+  programmiUtente: Programma[] // creati con l'editor
+  canoniciUtente: EsercizioCanonico[] // esercizi custom
+  alimentiUtente: Alimento[] // alimenti aggiunti a mano
+  noteCheckIn: string // note e fastidi per il prossimo check-in
 }

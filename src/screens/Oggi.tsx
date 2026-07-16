@@ -1,112 +1,79 @@
 import { useMemo, useState } from 'react'
-import { PROGRAMMA, ADDOME } from '../data/programma'
-import { canonicoById } from '../data/canonici'
+import { ADDOME } from '../data/programma'
 import { PROSSIMO_CHECK } from '../data/checks'
+import { ALTERNATIVE_COACH } from '../data/muscoli'
 import { useStore, oggiISO } from '../lib/store'
 import {
-  settimanaCorrente, blocchiSettimana, targetBlocco, ultimaVolta, record,
-  incrementoDefault, tonnellaggioSessione, fmtKg, fmtData, fmtBlocco,
+  settimanaCorrente, blocchiSettimana, targetBlocco, ultimaVolta, record, recordReps,
+  incrementoDefault, tonnellaggioSessione, serieAllenantiSessione, fmtKg, fmtData, fmtBlocco,
+  programmaAttivo, canonico, isAllenante, rirMedio, PASSO_CARICO, arrotondaCarico, fmtCarico,
+  TIPI_SIGLA, TIPI_LABEL,
 } from '../lib/progression'
-import { BigNum, Quote, RestTimer, PlateCalc, Sheet, Stepper } from '../components/comuni'
+import { BigNum, Quote, RestBar, PlateCalc, Sheet, Stepper, RirSelect, TecnicaSelect, Progress, useWakeLock } from '../components/comuni'
 import { fraseDelGiorno } from '../data/frasi'
-import type { Blocco, LogSerie, Prescrizione } from '../types'
+import type { LogSerie, Prescrizione, TipoSerie, Tecnica } from '../types'
+import heroImg from '../assets/img/chalk.jpg'
+import arnoldImg from '../assets/img/arnold.jpg'
 
-// ————— Card esercizio nella lista del giorno —————
-function CardEsercizio({ p, settimana, fatto, onApri }: {
-  p: Prescrizione; settimana: number; fatto: boolean; onApri: () => void
+const TIPI_ORDINE: TipoSerie[] = ['riscaldamento', 'preparatoria', 'working', 'top', 'backoff', 'drop', 'restpause', 'parziale']
+
+// ————— Sheet di logging —————
+function LogSheet({ p, settimana, onClose, onRest }: {
+  p: Prescrizione; settimana: number
+  onClose: () => void
+  onRest: (secondi: number | null) => void
 }) {
-  const { stato } = useStore()
-  const can = canonicoById(p.esercizioId)!
-  const blocchi = blocchiSettimana(p, settimana)
-  const ultima = ultimaVolta(stato, p.esercizioId)
-  const inc = stato.incrementi[p.esercizioId] ?? incrementoDefault(p.esercizioId)
-  const tgt = blocchi.length ? targetBlocco(blocchi[0], ultima, inc) : null
-
-  return (
-    <button className="card card--knurled" style={{ textAlign: 'left', opacity: fatto ? 0.55 : 1 }} onClick={onApri}>
-      <div className="row row--between" style={{ alignItems: 'flex-start' }}>
-        <div style={{ flex: 1, paddingLeft: 8 }}>
-          <div className="display" style={{ fontSize: '1.05rem', letterSpacing: '0.03em' }}>{can.nome}</div>
-          <div className="small fade-dim" style={{ marginTop: 2 }}>
-            {blocchi.map(fmtBlocco).join('  +  ')}
-            {p.rest ? `  ·  rest ${p.rest}"` : ''}
-          </div>
-          {p.note && <div className="tiny" style={{ color: 'var(--dim)', marginTop: 2 }}>{p.note}</div>}
-          <div className="small" style={{ marginTop: 8 }}>
-            {ultima
-              ? <span className="fade-dim">Ultima volta ({fmtData(ultima.data)}): <b style={{ color: 'var(--text)' }}>
-                  {ultima.serie.map(s => `${s.carico}×${s.reps}`).join('  ')}</b></span>
-              : <span className="fade-dim">Mai loggato — si parte oggi</span>}
-          </div>
-          {tgt && tgt.carico !== null && (
-            <div className="small" style={{ marginTop: 3, color: tgt.aumento ? 'var(--fire)' : 'var(--text)', fontWeight: 700 }}>
-              {tgt.aumento ? '▲ ' : ''}Target: {tgt.carico} kg × {tgt.reps}
-            </div>
-          )}
-        </div>
-        <div style={{ paddingLeft: 6 }}>
-          {fatto
-            ? <span className="tag-pr" style={{ color: 'var(--text)', borderColor: 'var(--line)' }}>FATTO</span>
-            : <span className="display" style={{ color: 'var(--dim)', fontSize: '1.4rem' }}>›</span>}
-        </div>
-      </div>
-    </button>
-  )
-}
-
-// ————— Sheet di logging serie per serie —————
-function LogSheet({ p, settimana, onClose }: { p: Prescrizione; settimana: number; onClose: () => void }) {
   const { stato, invia } = useStore()
-  const can = canonicoById(p.esercizioId)!
+  const can = canonico(stato, p.esercizioId)!
   const blocchi = blocchiSettimana(p, settimana)
   const ultima = ultimaVolta(stato, p.esercizioId)
   const inc = stato.incrementi[p.esercizioId] ?? incrementoDefault(p.esercizioId)
   const rec = record(stato, p.esercizioId)
 
-  // righe pianificate: espandi i blocchi in serie singole
   const piano = useMemo(() => {
-    const righe: { blocco: Blocco; backOff: boolean }[] = []
-    for (const b of blocchi) for (let i = 0; i < b.sets; i++) righe.push({ blocco: b, backOff: !!b.backOff })
+    const righe: { tipo: TipoSerie }[] = []
+    for (const b of blocchi) for (let i = 0; i < b.sets; i++) righe.push({ tipo: b.backOff ? 'backoff' : 'working' })
     return righe
   }, [blocchi])
 
   const giaLoggate = stato.sessioneCorrente?.esercizi.find(e => e.esercizioId === p.esercizioId)?.serie ?? []
   const [serie, setSerie] = useState<LogSerie[]>(giaLoggate)
-  const [timer, setTimer] = useState<null | { secondi: number | null }>(null)
 
-  const prossima = serie.length
-  const bloccoCorr = piano[Math.min(prossima, piano.length - 1)]?.blocco
+  const idx = serie.length
+  const tipoPianificato = piano[Math.min(idx, piano.length - 1)]?.tipo ?? 'working'
+  const bloccoCorr = blocchi[Math.min(
+    blocchi.length - 1,
+    blocchi.findIndex((_, bi) => serie.length < blocchi.slice(0, bi + 1).reduce((n, b) => n + b.sets, 0)),
+  )] ?? blocchi[0]
   const tgt = bloccoCorr ? targetBlocco(bloccoCorr, ultima, inc) : null
-  const isBackOff = piano[Math.min(prossima, piano.length - 1)]?.backOff ?? false
 
-  // precompila: target, oppure ultima serie loggata
-  const base = serie.length > 0 ? serie[serie.length - 1] : null
-  const caricoInit = isBackOff && base
-    ? Math.round(base.carico * 0.775 / 0.5) * 0.5 // back off: -22,5% (metà del range 20-25 del coach)
-    : base?.carico ?? tgt?.carico ?? 20
-  const [carico, setCarico] = useState<number>(caricoInit)
+  const ultimaLoggata = serie[serie.length - 1] ?? null
+  const [tipo, setTipo] = useState<TipoSerie>(tipoPianificato)
+  const [carico, setCarico] = useState<number>(ultimaLoggata?.carico ?? tgt?.carico ?? 20)
   const [reps, setReps] = useState<number>(tgt?.reps ?? bloccoCorr?.repMin ?? 8)
+  const [rir, setRir] = useState<LogSerie['rir']>(ultimaLoggata?.rir)
+  const [tecnica, setTecnica] = useState<Tecnica | undefined>(undefined)
   const [vediPiastre, setVediPiastre] = useState(false)
+  const [vediTipi, setVediTipi] = useState(false)
 
-  const stepKg = can.attrezzo === 'manubri' ? 1 : 0.5
-
-  function salvaSerie() {
-    const nuova: LogSerie = { carico, reps, ...(isBackOff ? { backOff: true } : {}) }
-    const agg = [...serie, nuova]
+  function salva(s: LogSerie) {
+    const agg = [...serie, s]
     setSerie(agg)
     invia({ t: 'logga-esercizio', log: { esercizioId: p.esercizioId, serie: agg } })
-    // rest: prescritto → countdown; altrimenti cronometro libero ("quando ti senti pronto")
-    if (agg.length < piano.length) setTimer({ secondi: p.rest ?? null })
-    // prossimo blocco può cambiare reps target e carico (back off: -22,5%, metà del range 20-25)
-    const prossimo = piano[Math.min(agg.length, piano.length - 1)]
-    if (prossimo) {
-      if (prossimo.backOff && !isBackOff) {
-        setCarico(Math.round(nuova.carico * 0.775 * 2) / 2)
-      }
-      const t2 = targetBlocco(prossimo.blocco, ultima, inc)
-      setReps(t2?.reps ?? prossimo.blocco.repMin)
+    if (s.tipo !== 'riscaldamento') onRest(p.rest ?? null)
+    // prepara la prossima: tipo dal piano, back off scala il carico (-22,5%)
+    const prossimoTipo = piano[Math.min(agg.length, piano.length - 1)]?.tipo ?? s.tipo
+    setTipo(prossimoTipo)
+    if (prossimoTipo === 'backoff' && s.tipo !== 'backoff') {
+      setCarico(arrotondaCarico(s.carico * 0.775))
+      const bo = blocchi.find(b => b.backOff)
+      setReps(bo?.repMin ?? s.reps)
     }
+    setTecnica(undefined)
   }
+
+  const salvaCorrente = () => salva({ carico, reps, tipo, rir, tecnica })
+  const ripetiUltima = () => { if (ultimaLoggata) salva({ ...ultimaLoggata, tecnica: undefined }) }
 
   function rimuoviUltima() {
     const agg = serie.slice(0, -1)
@@ -114,82 +81,109 @@ function LogSheet({ p, settimana, onClose }: { p: Prescrizione; settimana: numbe
     invia({ t: 'logga-esercizio', log: { esercizioId: p.esercizioId, serie: agg } })
   }
 
-  const nuovoRecord = rec && carico > rec.carico
+  const nuovoRecordCarico = rec && isAllenante({ carico, reps, tipo }) && carico > rec.carico
+  const repRecord = recordReps(stato, p.esercizioId, carico)
+  const fatteAllenanti = serie.filter(isAllenante).length
+  const pianoAllenanti = piano.filter(r => r.tipo !== 'riscaldamento').length
 
   return (
     <Sheet onClose={onClose}>
       <div className="stack">
         <div>
-          <div className="kicker">{fmtBlocco(bloccoCorr ?? blocchi[0])}{p.rest ? ` · REST ${p.rest}"` : ''}</div>
-          <h2 className="display" style={{ fontSize: '1.5rem', marginTop: 2 }}>{can.nome}</h2>
+          <div className="kicker">{blocchi.map(fmtBlocco).join(' + ')}{p.rest ? ` · rest ${p.rest}"` : ''}</div>
+          <h2 style={{ fontSize: '1.35rem', fontWeight: 800, marginTop: 2, lineHeight: 1.15 }}>{can.nome}</h2>
           {p.note && <div className="small fade-dim">{p.note}</div>}
         </div>
 
         {ultima && (
           <div className="card" style={{ background: 'var(--surface-2)', padding: 10 }}>
-            <span className="tiny kicker">ULTIMA VOLTA — {fmtData(ultima.data)}</span>
-            <div style={{ marginTop: 4, fontFamily: 'var(--display)', fontSize: '1.1rem', letterSpacing: '0.04em' }}>
+            <span className="tiny kicker">Ultima volta — {fmtData(ultima.data)}</span>
+            <div style={{ marginTop: 4, fontFamily: 'var(--display)', fontSize: '1.05rem', letterSpacing: '0.04em' }}>
               {ultima.serie.map((s, i) => (
-                <span key={i} style={{ marginRight: 14, color: s.backOff ? 'var(--muted)' : 'var(--text)' }}>
-                  {s.carico}<span className="tiny fade-dim">kg</span>×{s.reps}
+                <span key={i} style={{ marginRight: 12, color: isAllenante(s) ? 'var(--text)' : 'var(--dim)' }}>
+                  {fmtCarico(s.carico)}<span className="tiny fade-dim">kg</span>×{s.reps}
+                  {s.rir !== undefined && <span className="tiny fade-dim">@{s.rir}</span>}
                 </span>
               ))}
             </div>
-            {tgt && tgt.motivo && <div className="tiny" style={{ color: tgt.aumento ? 'var(--fire)' : 'var(--dim)', marginTop: 4 }}>{tgt.motivo}</div>}
+            {tgt?.motivo && <div className="tiny" style={{ color: tgt.aumento ? 'var(--fire)' : 'var(--dim)', marginTop: 4 }}>{tgt.motivo}</div>}
           </div>
         )}
 
-        {/* serie già fatte */}
         {serie.length > 0 && (
           <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
             {serie.map((s, i) => (
-              <span key={i} className="pill pill--on" style={s.backOff ? { background: 'var(--surface-2)', color: 'var(--muted)', borderColor: 'var(--line)' } : {}}>
-                {i + 1}ª · {s.carico}kg × {s.reps}{s.backOff ? ' BO' : ''}
+              <span key={i} className={`pill anim-pop ${isAllenante(s) ? 'pill--on' : ''}`}>
+                {fmtCarico(s.carico)}×{s.reps}
+                {s.rir !== undefined ? ` @${s.rir}` : ''}
+                {!isAllenante(s) ? ` ${TIPI_SIGLA[s.tipo]}` : ''}
               </span>
             ))}
             <button className="pill" onClick={rimuoviUltima} aria-label="rimuovi ultima serie">↩︎</button>
           </div>
         )}
 
-        {prossima < piano.length ? (
-          <>
-            <div className="kicker" style={{ marginTop: 4 }}>
-              SERIE {prossima + 1} DI {piano.length}{isBackOff ? ' — BACK OFF (−20/25%)' : ''}
-            </div>
-            <div className="row row--between">
-              <div>
-                <div className="tiny kicker" style={{ marginBottom: 4 }}>CARICO</div>
-                <Stepper value={carico} step={stepKg} onChange={setCarico}
-                  format={v => `${v % 1 === 0 ? v : v.toFixed(1)}`} />
-              </div>
-              <div>
-                <div className="tiny kicker" style={{ marginBottom: 4 }}>REPS</div>
-                <Stepper value={reps} step={1} min={1} onChange={setReps} />
-              </div>
-            </div>
-            {nuovoRecord && !isBackOff && (
-              <div className="tag-pr" style={{ alignSelf: 'flex-start' }}>▲ SOPRA IL TUO MASSIMO STORICO ({rec!.carico} kg)</div>
-            )}
-            {(can.attrezzo === 'bilanciere') && (
-              <button className="small fade-dim" style={{ textAlign: 'left' }} onClick={() => setVediPiastre(v => !v)}>
-                {vediPiastre ? '▾' : '▸'} piastre
+        <div className="row row--between">
+          <span className="kicker">
+            Serie {Math.min(idx + 1, 99)}{pianoAllenanti ? ` · working ${fatteAllenanti}/${pianoAllenanti}` : ''}
+          </span>
+          <button className="tiny fade-dim" onClick={() => setVediTipi(v => !v)}>
+            {TIPI_LABEL[tipo]} {vediTipi ? '▴' : '▾'}
+          </button>
+        </div>
+        {vediTipi && (
+          <div className="chips">
+            {TIPI_ORDINE.map(t => (
+              <button key={t} className={`chip ${tipo === t ? 'chip--on' : ''}`}
+                onClick={() => { setTipo(t); setVediTipi(false) }}>
+                {TIPI_LABEL[t]}
               </button>
-            )}
-            {vediPiastre && can.attrezzo === 'bilanciere' && <PlateCalc carico={carico} />}
-            <button className="btn btn--fire" onClick={salvaSerie}>
-              SEGNA {carico % 1 === 0 ? carico : carico.toFixed(1)} KG × {reps}
-            </button>
-          </>
-        ) : (
-          <div className="card" style={{ textAlign: 'center', background: 'var(--surface-2)' }}>
-            <div className="display" style={{ fontSize: '1.2rem' }}>ESERCIZIO COMPLETO</div>
-            <div className="small fade-dim">Tutte le {piano.length} serie a referto.</div>
+            ))}
           </div>
         )}
 
-        <button className="btn" onClick={onClose}>CHIUDI</button>
+        <div className="row row--between">
+          <div>
+            <div className="tiny kicker" style={{ marginBottom: 4 }}>Carico (kg)</div>
+            <Stepper value={carico} step={PASSO_CARICO} onChange={setCarico} format={fmtCarico} />
+          </div>
+          <div>
+            <div className="tiny kicker" style={{ marginBottom: 4 }}>Reps</div>
+            <Stepper value={reps} step={1} min={1} onChange={setReps} />
+          </div>
+        </div>
+
+        <RirSelect value={rir} onChange={v => setRir(v as LogSerie['rir'])} />
+        <TecnicaSelect value={tecnica} onChange={setTecnica} />
+
+        {nuovoRecordCarico && (
+          <div className="tag-pr anim-record" style={{ alignSelf: 'flex-start' }}>
+            ▲ Sopra il tuo massimo storico ({fmtCarico(rec!.carico)} kg)
+          </div>
+        )}
+        {!nuovoRecordCarico && repRecord > 0 && reps > repRecord && isAllenante({ carico, reps, tipo }) && (
+          <div className="tag-pr anim-record" style={{ alignSelf: 'flex-start' }}>
+            ▲ Rep record a {fmtCarico(carico)} kg (finora {repRecord})
+          </div>
+        )}
+
+        {can.attrezzo === 'bilanciere' && (
+          <button className="small fade-dim" style={{ textAlign: 'left' }} onClick={() => setVediPiastre(v => !v)}>
+            {vediPiastre ? '▾' : '▸'} piastre
+          </button>
+        )}
+        {vediPiastre && can.attrezzo === 'bilanciere' && <PlateCalc carico={carico} />}
+
+        <button className="btn btn--fire" onClick={salvaCorrente}>
+          Segna {fmtCarico(carico)} kg × {reps}{rir !== undefined ? ` @${rir === 4 ? '4+' : rir} RIR` : ''}
+        </button>
+        {ultimaLoggata && (
+          <button className="btn" onClick={ripetiUltima}>
+            Ripeti ultima · {fmtCarico(ultimaLoggata.carico)} × {ultimaLoggata.reps}{ultimaLoggata.rir !== undefined ? ` @${ultimaLoggata.rir}` : ''}
+          </button>
+        )}
+        <button className="btn btn--ghost" onClick={onClose}>Chiudi</button>
       </div>
-      {timer && <RestTimer secondi={timer.secondi} onFine={() => setTimer(null)} />}
     </Sheet>
   )
 }
@@ -199,23 +193,21 @@ function Resoconto({ onChiudi }: { onChiudi: () => void }) {
   const { stato, invia } = useStore()
   const c = stato.sessioneCorrente!
   const ton = tonnellaggioSessione(c)
-  const nSerie = c.esercizi.reduce((n, e) => n + e.serie.length, 0)
+  const nAllenanti = serieAllenantiSessione(c)
+  const nTotali = c.esercizi.reduce((n, e) => n + e.serie.length, 0)
   const durata = c.inizio ? Math.round((Date.now() - new Date(c.inizio).getTime()) / 60000) : null
+  const tutteLeSerie = c.esercizi.flatMap(e => e.serie)
+  const rir = rirMedio(tutteLeSerie)
 
-  // confronto con l'ultima sessione dello stesso giorno (descrizione di trend, non consiglio)
   const precedente = [...stato.sessioni].reverse().find(s => s.giornoN === c.giornoN)
   const tonPrec = precedente ? tonnellaggioSessione(precedente) : null
 
-  // record battuti oggi
   const records: string[] = []
   for (const e of c.esercizi) {
-    const can = canonicoById(e.esercizioId)
-    const statoSenzaOggi = { ...stato, sessioni: stato.sessioni }
-    const rec = record(statoSenzaOggi, e.esercizioId)
-    const maxOggi = Math.max(...e.serie.filter(s => !s.backOff).map(s => s.carico), 0)
-    if (can && maxOggi > 0 && (!rec || maxOggi > rec.carico)) {
-      records.push(`${can.nome} — ${maxOggi} kg`)
-    }
+    const can = canonico(stato, e.esercizioId)
+    const rec = record(stato, e.esercizioId)
+    const maxOggi = Math.max(...e.serie.filter(isAllenante).map(s => s.carico), 0)
+    if (can && maxOggi > 0 && (!rec || maxOggi > rec.carico)) records.push(`${can.nome} — ${fmtCarico(maxOggi)} kg`)
   }
 
   const t = fmtKg(ton)
@@ -223,30 +215,31 @@ function Resoconto({ onChiudi }: { onChiudi: () => void }) {
 
   return (
     <Sheet onClose={() => {}}>
-      <div className="stack" style={{ textAlign: 'center', paddingTop: 8 }}>
-        <div className="kicker kicker--fire">SESSIONE CHIUSA — GIORNO {c.giornoN} · {c.giornoNome}</div>
-        <div>
+      <div className="hero" style={{ backgroundImage: `url(${arnoldImg})`, margin: '-18px -16px 0', padding: '28px 16px 18px', borderRadius: '18px 18px 0 0' }}>
+        <div className="kicker kicker--fire" style={{ textAlign: 'center' }}>Sessione chiusa — giorno {c.giornoN} · {c.giornoNome}</div>
+        <div style={{ textAlign: 'center', marginTop: 10 }}>
           <BigNum v={t.v} u={t.u} size={4.4} />
-          <div className="kicker" style={{ marginTop: 4 }}>FERRO SPOSTATO OGGI</div>
+          <div className="kicker" style={{ marginTop: 4 }}>ferro spostato (riscaldamenti esclusi)</div>
         </div>
-        <div className="row" style={{ justifyContent: 'center', gap: 28 }}>
-          <div><BigNum v={nSerie} size={1.9} /><div className="tiny kicker">SERIE</div></div>
-          <div><BigNum v={c.esercizi.length} size={1.9} /><div className="tiny kicker">ESERCIZI</div></div>
-          {durata !== null && durata > 0 && (
-            <div><BigNum v={durata} u="min" size={1.9} /><div className="tiny kicker">DURATA</div></div>
-          )}
+      </div>
+      <div className="stack" style={{ textAlign: 'center', paddingTop: 14 }}>
+        <div className="row" style={{ justifyContent: 'center', gap: 24, flexWrap: 'wrap' }}>
+          <div><BigNum v={nAllenanti} size={1.8} /><div className="tiny kicker">working set</div></div>
+          <div><BigNum v={nTotali} size={1.8} /><div className="tiny kicker">serie totali</div></div>
+          {rir !== null && <div><BigNum v={rir} size={1.8} /><div className="tiny kicker">RIR medio</div></div>}
+          {durata !== null && durata > 0 && <div><BigNum v={durata} u="min" size={1.8} /><div className="tiny kicker">durata</div></div>}
         </div>
         {tonPrec !== null && tonPrec > 0 && (
           <div className="small fade-dim">
-            Stesso giorno, ciclo in corso ({fmtData(precedente!.data)}): {fmtKg(tonPrec).v} {fmtKg(tonPrec).u} —{' '}
+            Stesso giorno ({fmtData(precedente!.data)}): {fmtKg(tonPrec).v} {fmtKg(tonPrec).u} —{' '}
             {ton >= tonPrec
               ? <b style={{ color: 'var(--fire)' }}>+{fmtKg(ton - tonPrec).v} {fmtKg(ton - tonPrec).u}</b>
-              : <b>{fmtKg(ton - tonPrec).v.replace('-', '−')} {fmtKg(Math.abs(ton - tonPrec)).u}</b>}
+              : <b>−{fmtKg(Math.abs(ton - tonPrec)).v} {fmtKg(Math.abs(ton - tonPrec)).u}</b>}
           </div>
         )}
         {records.length > 0 && (
-          <div className="card" style={{ borderColor: 'var(--fire-deep)' }}>
-            <div className="kicker kicker--fire" style={{ marginBottom: 6 }}>MASSIMI STORICI DI OGGI</div>
+          <div className="card anim-record" style={{ borderColor: 'var(--fire-deep)' }}>
+            <div className="kicker kicker--fire" style={{ marginBottom: 6 }}>Massimi storici di oggi</div>
             {records.map((r, i) => <div key={i} className="small" style={{ fontWeight: 700 }}>{r}</div>)}
           </div>
         )}
@@ -254,7 +247,7 @@ function Resoconto({ onChiudi }: { onChiudi: () => void }) {
           “{frase.testo}”{frase.autore && <span className="autore">— {frase.autore}</span>}
         </div>
         <button className="btn btn--fire" onClick={() => { invia({ t: 'chiudi-sessione' }); onChiudi() }}>
-          A REFERTO
+          A referto
         </button>
       </div>
     </Sheet>
@@ -264,91 +257,199 @@ function Resoconto({ onChiudi }: { onChiudi: () => void }) {
 // ————— Schermata OGGI —————
 export default function Oggi() {
   const { stato, invia } = useStore()
-  const sett = settimanaCorrente()
+  const programma = programmaAttivo(stato)
+  const sett = settimanaCorrente(programma)
 
-  // giorno suggerito: il successivo all'ultima sessione
   const ultimo = stato.sessioni.length ? stato.sessioni[stato.sessioni.length - 1].giornoN : 0
-  const suggerito = (ultimo % 5) + 1
+  const nGiorni = programma.giorni.length || 1
+  const suggerito = programma.giorni.length ? programma.giorni[(programma.giorni.findIndex(g => g.n === ultimo) + 1) % nGiorni]?.n ?? programma.giorni[0].n : 1
   const [giornoSel, setGiornoSel] = useState(stato.sessioneCorrente?.giornoN ?? suggerito)
   const [aperto, setAperto] = useState<string | null>(null)
   const [resoconto, setResoconto] = useState(false)
+  const [rest, setRest] = useState<{ secondi: number | null; k: number } | null>(null)
 
-  const giorno = PROGRAMMA.giorni.find(g => g.n === giornoSel)!
-  const inSessione = stato.sessioneCorrente !== null && stato.sessioneCorrente.giornoN === giornoSel
-  const fatti = new Set(stato.sessioneCorrente?.esercizi.filter(e => e.serie.length > 0).map(e => e.esercizioId))
+  const giorno = programma.giorni.find(g => g.n === giornoSel) ?? programma.giorni[0]
+  const sc = stato.sessioneCorrente
+  const inSessione = sc !== null && sc.giornoN === giornoSel
+  useWakeLock(sc !== null)
+
+  const fatti = new Set(sc?.esercizi.filter(e => e.serie.length > 0).map(e => e.esercizioId))
+  const rimandati = new Set(sc?.rimandati ?? [])
+
+  // ordine seduta: prescrizioni della scheda, ma i rimandati scivolano in fondo (la scheda non cambia)
+  const ordinati = useMemo(() => {
+    if (!giorno) return []
+    const base = [...giorno.prescrizioni].sort((a, b) => a.ordine - b.ordine)
+    return [...base.filter(p => !rimandati.has(p.esercizioId)), ...base.filter(p => rimandati.has(p.esercizioId))]
+  }, [giorno, sc?.rimandati])
+
+  const attivo = inSessione ? ordinati.find(p => !fatti.has(p.esercizioId) && !rimandati.has(p.esercizioId)) : null
+  const prossimo = attivo ? ordinati.find(p => p !== attivo && !fatti.has(p.esercizioId)) : null
+
+  // avanzamento: serie allenanti fatte / pianificate
+  const seriePianificate = giorno ? giorno.prescrizioni.reduce((n, p) => n + blocchiSettimana(p, sett.n).reduce((x, b) => x + b.sets, 0), 0) : 0
+  const serieFatte = sc?.esercizi.reduce((n, e) => n + e.serie.filter(s => s.tipo !== 'riscaldamento').length, 0) ?? 0
+  const minuti = sc?.inizio ? Math.round((Date.now() - new Date(sc.inizio).getTime()) / 60000) : 0
 
   const oggi = oggiISO()
-  const checkOggi = PROSSIMO_CHECK.data === oggi
+  const mostraCheck = !stato.profilo.ospite
   const giorniAlCheck = Math.ceil((new Date(PROSSIMO_CHECK.data + 'T00:00:00').getTime() - new Date(oggi + 'T00:00:00').getTime()) / 86_400_000)
+
+  if (!giorno) {
+    return (
+      <div className="screen stack">
+        <h1 className="display" style={{ fontSize: '2.4rem' }}>Oggi<span style={{ color: 'var(--fire)' }}>.</span></h1>
+        <div className="card" style={{ textAlign: 'center', padding: 30 }}>
+          <div style={{ fontWeight: 800 }}>Nessuna scheda attiva</div>
+          <p className="small fade-dim" style={{ marginTop: 6 }}>Crea la tua scheda dalla sezione Sala → La mia scheda.</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="screen stack" style={{ gap: 16 }}>
-      <header>
+      <div className="hero" style={{ backgroundImage: `url(${heroImg})` }}>
         <div className="row row--between">
-          <span className="kicker">SETTIMANA {sett.n} / {sett.totale} · {PROGRAMMA.nome.toUpperCase()}</span>
-          {checkOggi
-            ? <span className="pill pill--fire">CHECK OGGI {PROSSIMO_CHECK.ora}</span>
-            : giorniAlCheck > 0 && giorniAlCheck <= 14
-              ? <span className="pill">check −{giorniAlCheck}g</span>
-              : null}
+          <span className="kicker">Settimana {sett.n}/{sett.totale} · {programma.nome}</span>
+          {mostraCheck && (giorniAlCheck === 0
+            ? <span className="pill pill--fire">Check oggi {PROSSIMO_CHECK.ora}</span>
+            : giorniAlCheck > 0 && giorniAlCheck <= 14 ? <span className="pill">check −{giorniAlCheck}g</span> : null)}
         </div>
-        <h1 className="display" style={{ fontSize: '2.6rem', lineHeight: 1, marginTop: 6 }}>
-          OGGI<span style={{ color: 'var(--fire)' }}>.</span>
+        <h1 className="display" style={{ fontSize: '2.5rem', lineHeight: 1, marginTop: 6 }}>
+          Oggi<span style={{ color: 'var(--fire)' }}>.</span>
         </h1>
-      </header>
+        <Quote contesto={giornoSel === 2 || giornoSel === 5 ? 'legday' : 'apertura'} />
+      </div>
 
-      <Quote contesto={giornoSel === 2 || giornoSel === 5 ? 'legday' : 'apertura'} />
-
-      {/* selettore giorno */}
       <div className="row" style={{ overflowX: 'auto', paddingBottom: 4, gap: 8 }}>
-        {PROGRAMMA.giorni.map(g => (
-          <button key={g.n}
-            className={`pill ${g.n === giornoSel ? 'pill--on' : ''}`}
-            onClick={() => setGiornoSel(g.n)}>
+        {programma.giorni.map(g => (
+          <button key={g.n} className={`pill ${g.n === giornoSel ? 'pill--on' : ''}`} onClick={() => setGiornoSel(g.n)}>
             G{g.n} · {g.nome}
           </button>
         ))}
       </div>
 
       {!inSessione ? (
-        <button className="btn btn--fire" onClick={() => invia({ t: 'avvia-sessione', giornoN: giorno.n, giornoNome: giorno.nome })}>
-          INIZIA — GIORNO {giorno.n} · {giorno.nome}
+        <button className="btn btn--fire" onClick={() => invia({ t: 'avvia-sessione', giornoN: giorno.n, giornoNome: giorno.nome, programmaId: programma.id })}>
+          Inizia — giorno {giorno.n} · {giorno.nome}
         </button>
       ) : (
-        <div className="row" style={{ gap: 8 }}>
-          <button className="btn" style={{ flex: 1 }} onClick={() => invia({ t: 'annulla-sessione' })}>ANNULLA</button>
-          <button className="btn btn--fire" style={{ flex: 2 }}
-            disabled={fatti.size === 0}
-            onClick={() => setResoconto(true)}>
-            CHIUDI SESSIONE ({fatti.size}/{giorno.prescrizioni.length})
+        <>
+          <div className="card" style={{ padding: '10px 14px' }}>
+            <div className="row row--between">
+              <span className="small"><b>{serieFatte}</b> serie su {seriePianificate} · {minuti} min</span>
+              <button className="tiny fade-dim" onClick={() => invia({ t: 'annulla-sessione' })}>annulla</button>
+            </div>
+            <div style={{ margin: '8px 0 6px' }}><Progress done={serieFatte} total={seriePianificate} /></div>
+            {prossimo && (
+              <div className="tiny fade-dim">
+                Prossimo: <b style={{ color: 'var(--text)' }}>{canonico(stato, prossimo.esercizioId)?.nome}</b> — {blocchiSettimana(prossimo, sett.n).map(fmtBlocco).join(' + ')}
+              </div>
+            )}
+          </div>
+          <button className="btn btn--fire" disabled={fatti.size === 0} onClick={() => setResoconto(true)}>
+            Chiudi sessione ({fatti.size}/{giorno.prescrizioni.length})
           </button>
-        </div>
+        </>
       )}
 
       {giorno.addome && (
-        <div className="card" style={{ borderStyle: 'dashed', background: 'none' }}>
-          <span className="tiny kicker kicker--fire">REGOLA DEL COACH</span>
-          <div className="small" style={{ marginTop: 2 }}><b>{ADDOME.nome}</b> — {ADDOME.dettaglio}</div>
+        <div className="card" style={{ borderStyle: 'dashed', background: 'none', padding: '10px 14px' }}>
+          <span className="tiny kicker kicker--fire">Regola del coach</span>
+          <div className="small" style={{ marginTop: 2 }}><b>Addome prima della sessione</b> — {ADDOME.dettaglio}</div>
         </div>
       )}
 
-      <div className="stack">
-        {giorno.prescrizioni.map(p => (
-          <CardEsercizio key={p.esercizioId + p.ordine} p={p} settimana={sett.n}
-            fatto={fatti.has(p.esercizioId)}
-            onApri={() => {
-              if (!inSessione) invia({ t: 'avvia-sessione', giornoN: giorno.n, giornoNome: giorno.nome })
-              setAperto(p.esercizioId)
-            }} />
-        ))}
+      <div className="stack" style={{ gap: 8 }}>
+        {ordinati.map(p => {
+          const can = canonico(stato, p.esercizioId)!
+          const blocchi = blocchiSettimana(p, sett.n)
+          const fatto = fatti.has(p.esercizioId)
+          const inAttesa = rimandati.has(p.esercizioId)
+          const isAttivo = attivo?.esercizioId === p.esercizioId
+          const log = sc?.esercizi.find(e => e.esercizioId === p.esercizioId)
+
+          // card compressa quando completato
+          if (fatto && log) {
+            const allen = log.serie.filter(isAllenante)
+            const top = Math.max(...allen.map(s => s.carico), 0)
+            return (
+              <button key={p.esercizioId + p.ordine} className="card card--fatta row row--between anim-done" onClick={() => setAperto(p.esercizioId)}>
+                <span className="small" style={{ textAlign: 'left' }}>
+                  <span style={{ color: 'var(--fire)', marginRight: 8 }}>✓</span>
+                  <b>{can.nome}</b> — {log.serie.length} serie{top > 0 ? ` — ${fmtCarico(top)} kg` : ''}
+                </span>
+                <span className="tiny fade-dim">apri</span>
+              </button>
+            )
+          }
+
+          const ultima = ultimaVolta(stato, p.esercizioId)
+          const inc = stato.incrementi[p.esercizioId] ?? incrementoDefault(p.esercizioId)
+          const tgt = blocchi.length ? targetBlocco(blocchi[0], ultima, inc) : null
+          const alternative = (ALTERNATIVE_COACH[p.esercizioId] ?? [])
+            .map(id => canonico(stato, id)).filter(Boolean)
+
+          return (
+            <div key={p.esercizioId + p.ordine}
+              className={`card card--knurled ${isAttivo ? 'card--attiva' : ''}`}
+              style={{ opacity: inAttesa ? 0.55 : 1 }}>
+              <button style={{ textAlign: 'left', width: '100%' }} onClick={() => {
+                if (!inSessione) invia({ t: 'avvia-sessione', giornoN: giorno.n, giornoNome: giorno.nome, programmaId: programma.id })
+                if (inAttesa) invia({ t: 'riprendi-esercizio', esercizioId: p.esercizioId })
+                setAperto(p.esercizioId)
+              }}>
+                <div className="row row--between" style={{ alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1, paddingLeft: 8 }}>
+                    <div style={{ fontWeight: 800, fontSize: '1.02rem', lineHeight: 1.2 }}>{can.nome}</div>
+                    <div className="small fade-dim" style={{ marginTop: 2 }}>
+                      {blocchi.map(fmtBlocco).join('  +  ')}{p.rest ? `  ·  rest ${p.rest}"` : ''}
+                    </div>
+                    {p.note && <div className="tiny" style={{ color: 'var(--dim)', marginTop: 2 }}>{p.note}</div>}
+                    <div className="small" style={{ marginTop: 7 }}>
+                      {ultima
+                        ? <span className="fade-dim">Ultima ({fmtData(ultima.data)}): <b style={{ color: 'var(--text)' }}>
+                            {ultima.serie.filter(isAllenante).map(s => `${fmtCarico(s.carico)}×${s.reps}`).join('  ') || '—'}</b></span>
+                        : <span className="fade-dim">Mai loggato — si parte oggi</span>}
+                    </div>
+                    {tgt && tgt.carico !== null && (
+                      <div className="small" style={{ marginTop: 3, color: tgt.aumento ? 'var(--fire)' : 'var(--text)', fontWeight: 700 }}>
+                        {tgt.aumento ? '▲ ' : ''}Target: {fmtCarico(tgt.carico)} kg × {tgt.reps}
+                      </div>
+                    )}
+                  </div>
+                  <span className="display" style={{ color: isAttivo ? 'var(--fire)' : 'var(--dim)', fontSize: '1.4rem', paddingLeft: 6 }}>›</span>
+                </div>
+              </button>
+              {inSessione && !fatto && (
+                <div className="row" style={{ marginTop: 8, paddingLeft: 8, gap: 8, flexWrap: 'wrap' }}>
+                  {inAttesa
+                    ? <span className="tiny" style={{ color: 'var(--fire)' }}>In attesa — attrezzo occupato</span>
+                    : <button className="tiny fade-dim" onClick={() => invia({ t: 'rimanda-esercizio', esercizioId: p.esercizioId })}>
+                        ⟳ occupato, rimanda
+                      </button>}
+                  {alternative.length > 0 && (
+                    <span className="tiny" style={{ color: 'var(--dim)' }}>
+                      Alternativa autorizzata dal coach: {alternative.map(a => a!.nome).join(', ')}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
 
-      {aperto && (
+      {aperto && giorno.prescrizioni.some(p => p.esercizioId === aperto) && (
         <LogSheet
           p={giorno.prescrizioni.find(p => p.esercizioId === aperto)!}
           settimana={sett.n}
-          onClose={() => setAperto(null)} />
+          onClose={() => setAperto(null)}
+          onRest={s => setRest({ secondi: s, k: Date.now() })}
+        />
       )}
+      {rest && <RestBar key={rest.k} secondi={rest.secondi} onFine={() => setRest(null)} />}
       {resoconto && <Resoconto onChiudi={() => setResoconto(false)} />}
     </div>
   )
