@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react'
-import { useStore, oggiISO } from '../lib/store'
+import { useStore, oggiISO, lunediDi } from '../lib/store'
 import {
   storicoEsercizio, record, recordReps, fmtData, e1rm, migliorSerie, isAllenante,
-  rirMedio, fmtCarico, tuttiICanonici, canonico, programmaAttivo, tonnellaggio,
+  rirMedio, fmtCarico, tuttiICanonici, canonico, programmaAttivo, tonnellaggio, fineProgramma,
 } from '../lib/progression'
 import { MUSCOLO, DISTRETTI_LABEL, PROGRAMMI_STORICI, type Distretto } from '../data/muscoli'
 import { PROGRAMMA } from '../data/programma'
-import { BigNum, Quote, SparkDoppia, Spark } from '../components/comuni'
+import { SCHEDE_SEED } from '../data/riattivazione'
+import { BigNum, Quote, SparkDoppia } from '../components/comuni'
 import type { Stato, LogSerie } from '../types'
 
 type Vista = 'esercizi' | 'cicli' | 'settimana'
@@ -14,17 +15,18 @@ type Vista = 'esercizi' | 'cicli' | 'settimana'
 // periodo di un programma (per filtrare i log per mesociclo)
 function periodi(stato: Stato) {
   const attuale = programmaAttivo(stato)
-  const fine = new Date(attuale.dataInizio + 'T00:00:00')
-  fine.setDate(fine.getDate() + attuale.durataSettimane * 7 - 1)
-  const lista = [
-    ...(!stato.profilo.ospite ? PROGRAMMI_STORICI : []),
-    { id: attuale.id, nome: attuale.nome, dataInizio: attuale.dataInizio, dataFine: fine.toISOString().slice(0, 10) },
-    ...stato.programmiUtente.filter(p => p.id !== attuale.id).map(p => {
-      const f = new Date(p.dataInizio + 'T00:00:00')
-      f.setDate(f.getDate() + p.durataSettimane * 7 - 1)
-      return { id: p.id, nome: p.nome, dataInizio: p.dataInizio, dataFine: f.toISOString().slice(0, 10) }
-    }),
-  ]
+  const visti = new Set<string>()
+  const lista: { id: string; nome: string; dataInizio: string; dataFine: string }[] = []
+  const aggiungi = (p: { id: string; nome: string; dataInizio: string; dataFine: string }) => {
+    if (!visti.has(p.id)) { visti.add(p.id); lista.push(p) }
+  }
+  if (!stato.profilo.ospite) {
+    PROGRAMMI_STORICI.forEach(aggiungi)
+    // la scheda del coach e le seed (riattivazione) hanno sempre il loro periodo, anche se non attive
+    for (const p of [PROGRAMMA, ...SCHEDE_SEED]) aggiungi({ id: p.id, nome: p.nome, dataInizio: p.dataInizio, dataFine: fineProgramma(p) })
+  }
+  aggiungi({ id: attuale.id, nome: attuale.nome, dataInizio: attuale.dataInizio, dataFine: fineProgramma(attuale) })
+  for (const p of stato.programmiUtente) aggiungi({ id: p.id, nome: p.nome, dataInizio: p.dataInizio, dataFine: fineProgramma(p) })
   return lista.sort((a, b) => a.dataInizio.localeCompare(b.dataInizio))
 }
 
@@ -244,7 +246,7 @@ function Cicli() {
 function Settimana() {
   const { stato } = useStore()
   const oggi = oggiISO()
-  const lun = (() => { const d = new Date(oggi + 'T00:00:00'); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.toISOString().slice(0, 10) })()
+  const lun = lunediDi(oggi)
 
   const conta = useMemo(() => {
     const m = new Map<Distretto, number>()

@@ -20,6 +20,7 @@ export const MUSCOLO: Record<string, Distretto> = {
   'smith-panca-30': 'petto',
   'smith-panca-15': 'petto',
   'manubri-panca-30': 'petto',
+  'manubri-panca-45': 'petto',
   'chest-press': 'petto',
   'chest-press-inclinata': 'petto',
   'croci-cavi': 'petto',
@@ -53,6 +54,7 @@ export const MUSCOLO: Record<string, Distretto> = {
   'curl-scott-ez': 'bicipiti',
   'curl-hammer': 'bicipiti',
   'curl-manubri-seduto': 'bicipiti',
+  'curl-scott-martello': 'bicipiti',
   'push-down-sbarra-curva': 'tricipiti',
   'push-down-corda': 'tricipiti',
   'push-down-vulken': 'tricipiti',
@@ -73,6 +75,8 @@ export const MUSCOLO: Record<string, Distretto> = {
   'rdl-manubri': 'femorali',
   'hip-thrust': 'glutei',
   'bulgari-manubri': 'glutei',
+  'affondo-smith': 'glutei',
+  'affondi-camminata': 'glutei',
   'polpacci-pressa': 'polpacci',
   'polpacci-in-piedi': 'polpacci',
   'polpacci-seduto': 'polpacci',
@@ -91,13 +95,20 @@ export const ALTERNATIVE_COACH: Record<string, string[]> = {
   'distensioni-manubri-80': ['lento-avanti-smith'],
   'pec-fly': ['croci-cavi'], // "Croci ai cavi stretto seduto/Pec fly" (Maggio)
   'croci-cavi': ['pec-fly'],
+  'push-down-vulken': ['push-down-corda'], // "Push down corda o vulken in ginocchio" (Set/Ott)
+  'push-down-corda': ['push-down-vulken'],
+  'alzate-laterali-macchina': ['alzate-laterali-cavo'], // "Alzate laterali alla macchina o ai cavi singole" (Set/Ott)
+  'alzate-laterali-cavo': ['alzate-laterali-macchina'],
+  'dip-parallele': [], // "Dip parallele o machine": stesso canonico, cambia solo l'attrezzo
 }
 
-// Programmi storici (metadati per l'analisi per ciclo — i log partono da luglio 2026)
+// Programmi storici (metadati per l'analisi per ciclo — i log partono da luglio 2026).
+// Il ciclo corrente e le schede seed (riattivazione) si aggiungono a runtime in Storico.
 export const PROGRAMMI_STORICI: { id: string; nome: string; dataInizio: string; dataFine: string }[] = [
   { id: 'dicembre-2025', nome: 'Dicembre', dataInizio: '2025-11-24', dataFine: '2026-01-14' },
   { id: 'gennaio-febbraio-2026', nome: 'Gennaio / Febbraio', dataInizio: '2026-01-19', dataFine: '2026-02-18' },
   { id: 'marzo-2026', nome: 'Marzo', dataInizio: '2026-02-23', dataFine: '2026-03-27' },
   { id: 'aprile-2026', nome: 'Aprile', dataInizio: '2026-03-30', dataFine: '2026-05-03' },
   { id: 'maggio-2026', nome: 'Maggio', dataInizio: '2026-05-04', dataFine: '2026-06-14' },
+  { id: 'giugno-luglio-2-2026', nome: 'Giugno / Luglio 2', dataInizio: '2026-06-15', dataFine: '2026-07-19' },
 ]

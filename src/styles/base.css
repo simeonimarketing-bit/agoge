@@ -284,23 +284,27 @@ input, textarea {
 }
 .restbar-btn--fire { background: var(--fire); border-color: var(--fire); color: #fff; }
 
-/* ————— STEPPER (grande, per pollici) ————— */
+/* ————— STEPPER (grande, per pollici) —————
+   Due stepper affiancati devono stare in 343px (iPhone da 375 meno i gutter):
+   2 × (50 + 64 + 50) + 10 di gap = 338. */
 .stepper { display: flex; align-items: center; gap: 2px; }
 .stepper > button:first-child, .stepper > button:last-child {
-  width: 56px; height: 56px; font-size: 1.5rem; font-weight: 700;
+  width: 50px; height: 56px; font-size: 1.5rem; font-weight: 700;
   background: var(--surface-2); border: 1px solid var(--line);
+  flex: none;
 }
 .stepper > button:first-child { border-radius: 12px 0 0 12px; }
 .stepper > button:last-child { border-radius: 0 12px 12px 0; }
 .stepper .val {
-  min-width: 86px; height: 56px; display: flex; align-items: center; justify-content: center;
+  min-width: 64px; height: 56px; display: flex; align-items: center; justify-content: center;
   background: var(--bg); border: none;
   border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
   font-family: var(--display); font-size: 1.6rem;
+  padding: 0 6px;
 }
 .stepper .val-suffix { font-size: 0.55em; color: var(--muted); margin-left: 3px; }
 .stepper .val--input {
-  width: 86px; text-align: center; border-radius: 0;
+  width: 64px; text-align: center; border-radius: 0;
   font-family: var(--display); font-size: 1.6rem;
   background: var(--bg);
 }

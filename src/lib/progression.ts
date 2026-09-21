@@ -2,6 +2,8 @@ import type { Blocco, Prescrizione, Sessione, LogSerie, Stato, Programma, TipoSe
 import { TIPI_ALLENANTI } from '../types'
 import { PROGRAMMA } from '../data/programma'
 import { canonicoById, CANONICI } from '../data/canonici'
+import { SCHEDE_SEED } from '../data/riattivazione'
+import { aggiungiGiorni, oggiISO } from './store'
 
 // ————— Carichi reali: tutto si muove a passi di 2,5 kg —————
 // (manubri 10 → 12,5 → 15 → 17,5 → 20; bilanciere con le 1,25 per lato = 2,5 totali)
@@ -14,10 +16,20 @@ export function incrementoDefault(_esercizioId: string): number {
 }
 
 // ————— Programma attivo (seed di Salvatore o creato con l'editor) —————
+// ultimo giorno del ciclo (incluso)
+export function fineProgramma(p: Programma): string {
+  return aggiungiGiorni(p.dataInizio, p.durataSettimane * 7 - 1)
+}
+
 export function programmaAttivo(stato: Stato): Programma {
   if (stato.profilo.programmaAttivoId) {
-    const p = stato.programmiUtente.find(p => p.id === stato.profilo.programmaAttivoId)
-    if (p) return p
+    const utente = stato.programmiUtente.find(p => p.id === stato.profilo.programmaAttivoId)
+    if (utente) return utente
+    // le schede seed (es. riattivazione 15-20/09) valgono solo fino alla loro fine e comunque
+    // solo finché non parte il PDF del coach: da quel giorno la sua scheda vince da sola
+    const seed = SCHEDE_SEED.find(p => p.id === stato.profilo.programmaAttivoId)
+    const oggi = oggiISO()
+    if (seed && oggi <= fineProgramma(seed) && oggi < PROGRAMMA.dataInizio) return seed
   }
   if (stato.profilo.ospite) return stato.programmiUtente[0] ?? PROGRAMMA_VUOTO
   return PROGRAMMA
@@ -46,6 +58,10 @@ export function settimanaCorrente(programma: Programma, oggi = new Date()): { n:
 
 // ————— Serie: allenanti vs il resto —————
 export const isAllenante = (s: LogSerie) => TIPI_ALLENANTI.includes(s.tipo)
+// "set effettivo" del coach: tutto tranne riscaldamento e avvicinamento
+export const isEffettiva = (s: LogSerie) => s.tipo !== 'riscaldamento' && s.tipo !== 'preparatoria'
+// scarico proposto per back off e drop (−22,5%, dentro il 20-25% scritto dal coach)
+export const SCARICO = 0.775
 
 export const TIPI_LABEL: Record<TipoSerie, string> = {
   riscaldamento: 'Riscaldamento', preparatoria: 'Preparatoria', working: 'Working', top: 'Top set',
@@ -153,6 +169,19 @@ export function blocchiSettimana(p: Prescrizione, settimana: number): Blocco[] {
   return p.blocchi[settimana] ?? p.blocchi[max] ?? []
 }
 
+// Il piano delle serie effettive di un esercizio, riga per riga, nell'ordine del coach:
+// le working del blocco, il back off, e il drop set "dopo l'ultima" se c'è scritto.
+export interface RigaPiano { tipo: TipoSerie; blocco: Blocco }
+export function pianoSerie(blocchi: Blocco[]): RigaPiano[] {
+  const righe: RigaPiano[] = []
+  for (const b of blocchi) {
+    for (let i = 0; i < b.sets; i++) righe.push({ tipo: b.backOff ? 'backoff' : 'working', blocco: b })
+    if (b.tecnica && /drop/i.test(b.tecnica)) righe.push({ tipo: 'drop', blocco: b })
+  }
+  return righe
+}
+export const serieEffettivePianificate = (blocchi: Blocco[]) => pianoSerie(blocchi).length
+
 // ————— Statistiche (fatti, non consigli) —————
 export function tonnellaggio(serie: LogSerie[]): number {
   // i riscaldamenti non entrano nel tonnellaggio
@@ -165,6 +194,19 @@ export function tonnellaggioSessione(s: Sessione): number {
 
 export function serieAllenantiSessione(s: Sessione): number {
   return s.esercizi.reduce((t, e) => t + e.serie.filter(isAllenante).length, 0)
+}
+
+export function serieEffettiveSessione(s: Sessione): number {
+  return s.esercizi.reduce((t, e) => t + e.serie.filter(isEffettiva).length, 0)
+}
+
+// ultima nota lasciata su un esercizio (regolazioni: sedile, presa, macchina)
+export function ultimaNota(stato: Stato, esercizioId: string): string | null {
+  for (let i = stato.sessioni.length - 1; i >= 0; i--) {
+    const e = stato.sessioni[i].esercizi.find(x => x.esercizioId === esercizioId)
+    if (e?.note?.trim()) return e.note.trim()
+  }
+  return null
 }
 
 export function rirMedio(serie: LogSerie[]): number | null {
@@ -189,14 +231,11 @@ export function fmtBlocco(b: Blocco): string {
   return `${b.sets}×${reps}${extra ? `  ${extra}` : ''}`
 }
 
-// media mobile a 7 giorni delle pesate
+// media mobile a 7 giorni delle pesate (date locali: vedi isoLocale)
 export function mediaMobile7(pesate: Record<string, number>, data: string): number | null {
-  const d0 = new Date(data + 'T00:00:00')
   const valori: number[] = []
   for (let i = 0; i < 7; i++) {
-    const d = new Date(d0)
-    d.setDate(d0.getDate() - i)
-    const iso = d.toISOString().slice(0, 10)
+    const iso = aggiungiGiorni(data, -i)
     if (pesate[iso] !== undefined) valori.push(pesate[iso])
   }
   if (!valori.length) return null

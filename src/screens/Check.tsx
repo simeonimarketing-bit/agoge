@@ -3,10 +3,11 @@ import { CHECKS, PROSSIMO_CHECK, PARAMETRI_GRAFICABILI } from '../data/checks'
 import { DIETA_INIZIO } from '../data/dieta'
 import { fmtData, settimanaCorrente, programmaAttivo, mediaMobile7 } from '../lib/progression'
 import { BigNum, Spark, Stepper } from '../components/comuni'
-import { oggiISO, useStore } from '../lib/store'
+import { oggiISO, useStore, aggiungiGiorni, giorniTra } from '../lib/store'
 
 const MESI = ['GEN', 'FEB', 'MAR', 'APR', 'MAG', 'GIU', 'LUG', 'AGO', 'SET', 'OTT', 'NOV', 'DIC']
 const label = (iso: string) => MESI[Number(iso.slice(5, 7)) - 1]
+const labelLunga = (iso: string) => `${MESI[Number(iso.slice(5, 7)) - 1].toLowerCase()} ${iso.slice(0, 4)}`
 
 export default function Check() {
   const { stato, invia } = useStore()
@@ -14,22 +15,20 @@ export default function Check() {
   const ultimo = CHECKS[CHECKS.length - 1]
   const primo = CHECKS[0]
   const oggi = oggiISO()
-  const giorniAlCheck = Math.ceil((new Date(PROSSIMO_CHECK.data + 'T00:00:00').getTime() - new Date(oggi + 'T00:00:00').getTime()) / 86_400_000)
+  const giorniAlCheck = giorniTra(oggi, PROSSIMO_CHECK.data)
 
   // pesata quotidiana + media mobile
   const pesataOggi = stato.pesate[oggi]
   const [peso, setPeso] = useState<number>(pesataOggi ?? ultimo?.peso ?? 75)
   const media = mediaMobile7(stato.pesate, oggi)
-  const settimanaScorsa = (() => {
-    const d = new Date(oggi + 'T00:00:00'); d.setDate(d.getDate() - 7)
-    return mediaMobile7(stato.pesate, d.toISOString().slice(0, 10))
-  })()
+  const settimanaScorsa = mediaMobile7(stato.pesate, aggiungiGiorni(oggi, -7))
   const pesateOrdinate = Object.entries(stato.pesate).sort((a, b) => a[0].localeCompare(b[0]))
 
   // contesto del mesociclo
   const programma = programmaAttivo(stato)
   const sett = settimanaCorrente(programma)
-  const giorniDieta = Math.floor((new Date(oggi + 'T00:00:00').getTime() - new Date(DIETA_INIZIO + 'T00:00:00').getTime()) / 86_400_000)
+  const giorniDieta = giorniTra(DIETA_INIZIO, oggi)
+  const mesiDiCheck = Math.round(giorniTra(primo.data, ultimo.data) / 30.4)
 
   const delta = (k: 'peso' | 'vita' | 'bf' | 'lbm') => {
     const d = ultimo[k] - primo[k]
@@ -39,7 +38,7 @@ export default function Check() {
   return (
     <div className="screen stack" style={{ gap: 16 }}>
       <header>
-        <span className="kicker">{ospite ? 'Il tuo corpo, misurato' : '6 check · nov 2025 → giu 2026 · Dott. Pappa'}</span>
+        <span className="kicker">{ospite ? 'Il tuo corpo, misurato' : `${CHECKS.length} check · ${labelLunga(primo.data)} → ${labelLunga(ultimo.data)} · Dott. Pappa`}</span>
         <h1 className="display" style={{ fontSize: '2.4rem', lineHeight: 1, marginTop: 6 }}>
           Il check<span style={{ color: 'var(--fire)' }}>.</span>
         </h1>
@@ -98,7 +97,7 @@ export default function Check() {
       {!ospite && (
         <>
           <div className="card">
-            <span className="tiny kicker">7 mesi in numeri — check ufficiali del coach</span>
+            <span className="tiny kicker">{mesiDiCheck} mesi in numeri — dal primo all'ultimo check del coach</span>
             <div className="row" style={{ marginTop: 10, justifyContent: 'space-between' }}>
               <div><BigNum v={delta('peso')} u="kg" size={1.5} /><div className="tiny kicker">peso</div></div>
               <div><BigNum v={delta('bf')} u="%" size={1.5} fire /><div className="tiny kicker">grasso</div></div>

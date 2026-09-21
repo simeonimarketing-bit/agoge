@@ -1,15 +1,9 @@
 import { useMemo, useState } from 'react'
-import { PASTI, FREQUENZE, INTEGRAZIONE, REGOLE_DIETA } from '../data/dieta'
-import { MACRO_OPZIONI, MACRO_VUOTO, somma, scala, arrotonda, trovaAlimento, ALIMENTI } from '../data/macro'
-import { useStore, oggiISO } from '../lib/store'
+import { PASTI, FREQUENZE, INTEGRAZIONE, REGOLE_DIETA, DIETA_NOME } from '../data/dieta'
+import { MACRO_OPZIONI, MACRO_VUOTO, somma, scala, arrotonda, ALIMENTI } from '../data/macro'
+import { useStore, oggiISO, lunediDi, giorniTra } from '../lib/store'
 import { Quote, Sheet, MacroRow } from '../components/comuni'
 import type { Pasto, Macro, VoceLibera, Alimento } from '../types'
-
-function inizioSettimana(iso: string): string {
-  const d = new Date(iso + 'T00:00:00')
-  d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
-  return d.toISOString().slice(0, 10)
-}
 
 const macroOpzione = (pastoId: string, n: number): Macro =>
   MACRO_OPZIONI[`${pastoId}-${n}`]?.macro ?? MACRO_VUOTO
@@ -129,7 +123,7 @@ export default function Dieta() {
     return { totale: arrotonda(somma(...parti)), selezionati: sel, mancanti: manca }
   }, [g, soloLibera])
 
-  const lunedi = inizioSettimana(oggi)
+  const lunedi = lunediDi(oggi)
   const contaCategorie = useMemo(() => {
     const conta: Record<string, number> = {}
     for (const [data, dg] of Object.entries(stato.dieta)) {
@@ -144,14 +138,12 @@ export default function Dieta() {
   }, [stato.dieta, lunedi, oggi])
 
   const ultimoSgarro = Object.entries(stato.dieta).filter(([, dg]) => dg.sgarro).map(([d]) => d).sort().pop()
-  const giorniDaSgarro = ultimoSgarro
-    ? Math.floor((new Date(oggi + 'T00:00:00').getTime() - new Date(ultimoSgarro + 'T00:00:00').getTime()) / 86_400_000)
-    : null
+  const giorniDaSgarro = ultimoSgarro ? giorniTra(ultimoSgarro, oggi) : null
 
   return (
     <div className="screen stack" style={{ gap: 16 }}>
       <header>
-        <span className="kicker">{soloLibera ? 'Dieta libera — logghi quello che mangi' : "Piano Giu/Lug · 4 pasti · l'opzione è l'unità"}</span>
+        <span className="kicker">{soloLibera ? 'Dieta libera — logghi quello che mangi' : `Piano ${DIETA_NOME} · 4 pasti · l'opzione è l'unità`}</span>
         <h1 className="display" style={{ fontSize: '2.4rem', lineHeight: 1, marginTop: 6 }}>
           La tavola<span style={{ color: 'var(--fire)' }}>.</span>
         </h1>

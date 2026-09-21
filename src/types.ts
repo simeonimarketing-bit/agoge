@@ -42,6 +42,7 @@ export interface Programma {
   durataSettimane: number
   pdfSorgente?: string
   giorni: GiornoProgramma[]
+  nota?: string // regola valida per tutto il ciclo, mostrata in Oggi
   custom?: boolean // creato con l'editor in-app
 }
 

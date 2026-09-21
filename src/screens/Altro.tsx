@@ -1,11 +1,12 @@
 import { useMemo, useRef, useState } from 'react'
-import { REGOLE_GLOBALI } from '../data/programma'
+import { REGOLE_GLOBALI, PROGRAMMA } from '../data/programma'
 import { CHECKS } from '../data/checks'
-import { useStore, esportaBackup, oggiISO } from '../lib/store'
+import { SCHEDE_SEED } from '../data/riattivazione'
+import { useStore, esportaBackup, oggiISO, aggiungiGiorni } from '../lib/store'
 import {
-  record, tonnellaggioSessione, fmtKg, fmtData, programmaAttivo, canonico, tuttiICanonici,
-  storicoEsercizio, migliorSerie, e1rm, rirMedio, isAllenante, mediaMobile7, fmtCarico,
-  settimanaCorrente,
+  tonnellaggioSessione, fmtKg, fmtData, programmaAttivo, canonico, tuttiICanonici,
+  storicoEsercizio, migliorSerie, e1rm, rirMedio, mediaMobile7,
+  settimanaCorrente, fineProgramma,
 } from '../lib/progression'
 import { Sheet, Stepper } from '../components/comuni'
 import type { Stato, Programma, GiornoProgramma, EsercizioCanonico } from '../types'
@@ -14,7 +15,7 @@ import type { Stato, Programma, GiornoProgramma, EsercizioCanonico } from '../ty
 function generaCheckIn(stato: Stato): string {
   const oggi = oggiISO()
   const r: string[] = []
-  const settimanaFa = (() => { const d = new Date(oggi + 'T00:00:00'); d.setDate(d.getDate() - 7); return d.toISOString().slice(0, 10) })()
+  const settimanaFa = aggiungiGiorni(oggi, -7)
 
   r.push(`CHECK-IN — ${fmtData(oggi)}`)
   r.push('')
@@ -71,7 +72,7 @@ function generaCheckIn(stato: Stato): string {
       else if (d < 1) stallo.push(nome)
     }
     if (migliorano.length) r.push(`• In miglioramento: ${migliorano.join(', ')}`)
-    if (stallo.length) r.push(`• In stallo: ${stallo.join(', ')}`)
+    if (stallo.length) r.push(`• In stallo o in calo: ${stallo.join(', ')}`)
     r.push('')
   }
 
@@ -291,8 +292,19 @@ export default function Altro() {
           Attiva: <b style={{ color: 'var(--text)' }}>{programma.nome}</b> (dal {fmtData(programma.dataInizio)}, {programma.durataSettimane} settimane
           — sett. {settimanaCorrente(programma).n})
         </p>
-        {stato.programmiUtente.length > 0 && (
+        {(stato.programmiUtente.length > 0 || SCHEDE_SEED.length > 0) && (
           <div className="stack" style={{ gap: 6, marginTop: 8 }}>
+            {!stato.profilo.ospite && SCHEDE_SEED.map(p => (
+              <div key={p.id} className="row row--between">
+                <button className="small" style={{ fontWeight: 700, textAlign: 'left' }}
+                  onClick={() => invia({ t: 'profilo', patch: { programmaAttivoId: p.id } })}>
+                  {programma.id === p.id ? '● ' : '○ '}{p.nome}
+                </button>
+                <span className="tiny fade-dim">
+                  {p.giorni.length} sedute · {fmtData(p.dataInizio)} → {fmtData(fineProgramma(p))}{oggiISO() > fineProgramma(p) ? ' · scaduta' : ''}
+                </span>
+              </div>
+            ))}
             {stato.programmiUtente.map(p => (
               <div key={p.id} className="row row--between">
                 <button className="small" style={{ fontWeight: 700, textAlign: 'left' }}
@@ -309,7 +321,7 @@ export default function Altro() {
             {!stato.profilo.ospite && (
               <button className="small" style={{ textAlign: 'left', fontWeight: 700 }}
                 onClick={() => invia({ t: 'profilo', patch: { programmaAttivoId: undefined } })}>
-                {!stato.profilo.programmaAttivoId ? '● ' : '○ '}Scheda del coach (PDF)
+                {programma.id === PROGRAMMA.id ? '● ' : '○ '}Scheda del coach — {PROGRAMMA.nome} (PDF)
               </button>
             )}
           </div>
@@ -388,7 +400,7 @@ export default function Altro() {
       </div>
 
       <p className="tiny" style={{ color: 'var(--dim)', textAlign: 'center', marginTop: 8 }}>
-        AGOGE v0.2 — l'AI cattura, comprime, ricorda, esegue. Non consiglia. Mai.
+        AGOGE v0.3 — l'AI cattura, comprime, ricorda, esegue. Non consiglia. Mai.
       </p>
 
       {/* area stampa per l'export PDF del check-in */}

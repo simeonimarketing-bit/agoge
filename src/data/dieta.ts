@@ -1,14 +1,17 @@
 import type { Pasto } from '../types'
 
-// Piano alimentare "Giugno Luglio 2" — inizio 10/06/2026, 5 settimane.
+// Piano alimentare "Settembre Ottobre" — inizio 16/09/2026, 5 settimane.
 // Timeline INDIPENDENTE dal programma allenamento (BRIEF §3).
-export const DIETA_INIZIO = '2026-06-10'
+// Differenze dal piano Giu/Lug: pasta a pranzo 120 → 100g (80g nelle opzioni coi legumi),
+// pan bauletto a colazione 3 → 4 fettine. Il resto è identico.
+export const DIETA_INIZIO = '2026-09-16'
+export const DIETA_NOME = 'Set/Ott'
 
 export const PASTI: Pasto[] = [
   {
     id: 'colazione', nome: 'Colazione',
     opzioni: [
-      { n: 1, voci: ['200ml latte proteico (o scremato + 15g proteine)', '6 fette biscottate integrali o 3 fettine pan bauletto', '20g fondente min 85% o 20g frutta secca'], categorie: ['latticini'] },
+      { n: 1, voci: ['200ml latte proteico (o scremato + 15g proteine)', '6 fette biscottate integrali o 4 fettine pan bauletto', '20g fondente min 85% o 20g frutta secca'], categorie: ['latticini'] },
       { n: 2, voci: ['20g burro di arachidi/mandorle/nocciole o 20g frutta secca', '50g cereali', '200ml latte proteico (o scremato + 15g proteine)'], categorie: ['latticini'] },
       { n: 3, voci: ['2 uova + 150g albume', '200ml spremuta di arancia o caffè americano', '60g pane tostato'], categorie: ['uova'] },
       { n: 4, titolo: 'Pancake', voci: ['200g albume', '60g farina di avena aromatizzata', '20g marmellata classica', '20g burro di arachidi'], categorie: ['uova'] },
@@ -17,14 +20,14 @@ export const PASTI: Pasto[] = [
   {
     id: 'pranzo', nome: 'Pranzo',
     opzioni: [
-      { n: 1, voci: ['100g pasta con 150g legumi cotti (o minestrone o zucca)', '10g olio EVO', '1 scatoletta tonno GRANDE al naturale', '20g parmigiano'], categorie: ['legumi', 'pesce'] },
-      { n: 2, voci: ['120g pasta con verdure o salsa di pomodoro', '10g olio EVO', '150g petto di pollo', '20g parmigiano'], categorie: ['carne_bianca'] },
-      { n: 3, voci: ['120g pasta con verdure o salsa di pomodoro', '150g petto di tacchino', '10g olio EVO', '20g parmigiano'], categorie: ['carne_bianca'] },
-      { n: 4, voci: ['120g pasta', '100g salmone affumicato', 'Rucola, pomodorini', '20g parmigiano'], categorie: ['pesce'] },
-      { n: 5, voci: ['120g pasta', '150g macinato magro o hamburger magro', 'Verdure', '20g parmigiano'], categorie: ['carne_rossa'] },
-      { n: 6, voci: ['100g pasta con 150g legumi cotti (o minestrone o zucca)', 'Pomodori, insalata', '2 uova intere + 150g albume', '20g parmigiano'], categorie: ['legumi', 'uova'] },
-      { n: 7, voci: ['120g pasta', '100g tonno al naturale', '10g olio', 'Pomodorini', '20g parmigiano'], categorie: ['pesce'] },
-      { n: 8, voci: ['120g pasta o riso', '100g ricotta vaccina', '100g affettato magro', 'Verdure', '20g parmigiano'], categorie: ['affettato', 'latticini'] },
+      { n: 1, voci: ['80g pasta con 150g legumi cotti (o minestrone o zucca)', '10g olio EVO', '1 scatoletta tonno GRANDE al naturale', '20g parmigiano'], categorie: ['legumi', 'pesce'] },
+      { n: 2, voci: ['100g pasta con verdure o salsa di pomodoro', '10g olio EVO', '150g petto di pollo', '20g parmigiano'], categorie: ['carne_bianca'] },
+      { n: 3, voci: ['100g pasta con verdure o salsa di pomodoro', '150g petto di tacchino', '10g olio EVO', '20g parmigiano'], categorie: ['carne_bianca'] },
+      { n: 4, voci: ['100g pasta', '100g salmone affumicato', 'Rucola, pomodorini', '20g parmigiano'], categorie: ['pesce'] },
+      { n: 5, voci: ['100g pasta', '150g macinato magro o hamburger magro', 'Verdure', '20g parmigiano'], categorie: ['carne_rossa'] },
+      { n: 6, voci: ['80g pasta con 150g legumi cotti (o minestrone o zucca)', 'Pomodori, insalata', '2 uova intere + 150g albume', '20g parmigiano'], categorie: ['legumi', 'uova'] },
+      { n: 7, voci: ['100g pasta', '100g tonno al naturale', '10g olio', 'Pomodorini', '20g parmigiano'], categorie: ['pesce'] },
+      { n: 8, voci: ['100g pasta o riso', '100g ricotta vaccina', '100g affettato magro', 'Verdure', '20g parmigiano'], categorie: ['affettato', 'latticini'] },
     ],
   },
   {

@@ -80,13 +80,13 @@ export function trovaAlimento(nome: string, extra: Alimento[] = []): Alimento | 
   return tutti.find(a => a.nome.toLowerCase() === q) ?? tutti.find(a => a.nome.toLowerCase().includes(q))
 }
 
-// ————— Macro per opzione del piano corrente (Giugno/Luglio 2) —————
+// ————— Macro per opzione del piano corrente (Settembre/Ottobre) —————
 // Chiave: `${pastoId}-${n}` — calcolo voce per voce dalle grammature del coach.
 export interface MacroOpzione { macro: Macro; assunzioni: string[] }
 
 export const MACRO_OPZIONI: Record<string, MacroOpzione> = {
   // COLAZIONE
-  'colazione-1': { // 200ml latte proteico · 6 fette biscottate integrali (≈48g) · 20g fondente
+  'colazione-1': { // 200ml latte proteico · 6 fette biscottate integrali (≈48g, o 4 fettine pan bauletto = 100g) · 20g fondente
     macro: arrotonda(somma(scala(m(44, 6, 4.5, 0.5, 0), 2), scala(m(380, 13, 68, 6, 8), 0.48), scala(m(590, 10, 28, 46, 12), 0.2))),
     assunzioni: ['Latte proteico (in alternativa: scremato + 15g proteine, macro simili)', '1 fetta biscottata = 8g → 6 = 48g', 'Scelto fondente (la frutta secca è simile: ~124 kcal)'] },
   'colazione-2': { // 20g burro arachidi · 50g cereali · 200ml latte proteico
@@ -99,29 +99,29 @@ export const MACRO_OPZIONI: Record<string, MacroOpzione> = {
     macro: arrotonda(somma(scala(m(52, 10.8, 0.7, 0.2, 0), 2), scala(m(370, 13, 66, 7, 8), 0.6), scala(m(220, 0.5, 54, 0.1, 1), 0.2), scala(m(600, 26, 12, 50, 7), 0.2))),
     assunzioni: [] },
   // PRANZO
-  'pranzo-1': { // 100g pasta + 150g legumi cotti · 10g olio · tonno GRANDE · 20g parmigiano
-    macro: arrotonda(somma(m(355, 12, 71, 1.5, 3), scala(m(90, 7, 14, 0.6, 6.5), 1.5), m(90, 0, 0, 10, 0), scala(m(100, 23.5, 0, 0.6, 0), 1.12), scala(m(390, 33, 0, 28, 0), 0.2))),
+  'pranzo-1': { // 80g pasta + 150g legumi cotti · 10g olio · tonno GRANDE · 20g parmigiano
+    macro: arrotonda(somma(scala(m(355, 12, 71, 1.5, 3), 0.8), scala(m(90, 7, 14, 0.6, 6.5), 1.5), m(90, 0, 0, 10, 0), scala(m(100, 23.5, 0, 0.6, 0), 1.12), scala(m(390, 33, 0, 28, 0), 0.2))),
     assunzioni: ['Scatoletta GRANDE = 112g sgocciolati (160g lordi)'] },
-  'pranzo-2': { // 120g pasta con verdure · 10g olio · 150g pollo · 20g parmigiano
-    macro: arrotonda(somma(scala(m(355, 12, 71, 1.5, 3), 1.2), scala(m(25, 1.5, 4, 0.3, 2.5), 2), m(90, 0, 0, 10, 0), scala(m(110, 23, 0, 1.5, 0), 1.5), scala(m(390, 33, 0, 28, 0), 0.2))),
+  'pranzo-2': { // 100g pasta con verdure · 10g olio · 150g pollo · 20g parmigiano
+    macro: arrotonda(somma(m(355, 12, 71, 1.5, 3), scala(m(25, 1.5, 4, 0.3, 2.5), 2), m(90, 0, 0, 10, 0), scala(m(110, 23, 0, 1.5, 0), 1.5), scala(m(390, 33, 0, 28, 0), 0.2))),
     assunzioni: ['Verdure = 200g miste*'] },
   'pranzo-3': { // come 2 ma tacchino
-    macro: arrotonda(somma(scala(m(355, 12, 71, 1.5, 3), 1.2), scala(m(25, 1.5, 4, 0.3, 2.5), 2), m(90, 0, 0, 10, 0), scala(m(107, 24, 0, 1, 0), 1.5), scala(m(390, 33, 0, 28, 0), 0.2))),
+    macro: arrotonda(somma(m(355, 12, 71, 1.5, 3), scala(m(25, 1.5, 4, 0.3, 2.5), 2), m(90, 0, 0, 10, 0), scala(m(107, 24, 0, 1, 0), 1.5), scala(m(390, 33, 0, 28, 0), 0.2))),
     assunzioni: ['Verdure = 200g miste*'] },
-  'pranzo-4': { // 120g pasta · 100g salmone affumicato · rucola pomodorini · 20g parmigiano
-    macro: arrotonda(somma(scala(m(355, 12, 71, 1.5, 3), 1.2), m(160, 25, 0, 6.5, 0), scala(m(20, 1, 3.5, 0.2, 1), 1.5), scala(m(390, 33, 0, 28, 0), 0.2))),
+  'pranzo-4': { // 100g pasta · 100g salmone affumicato · rucola pomodorini · 20g parmigiano
+    macro: arrotonda(somma(m(355, 12, 71, 1.5, 3), m(160, 25, 0, 6.5, 0), scala(m(20, 1, 3.5, 0.2, 1), 1.5), scala(m(390, 33, 0, 28, 0), 0.2))),
     assunzioni: ['Rucola e pomodorini = 150g*'] },
-  'pranzo-5': { // 120g pasta · 150g macinato magro · verdure · 20g parmigiano
-    macro: arrotonda(somma(scala(m(355, 12, 71, 1.5, 3), 1.2), scala(m(130, 21, 0, 5, 0), 1.5), scala(m(25, 1.5, 4, 0.3, 2.5), 2), scala(m(390, 33, 0, 28, 0), 0.2))),
+  'pranzo-5': { // 100g pasta · 150g macinato magro · verdure · 20g parmigiano
+    macro: arrotonda(somma(m(355, 12, 71, 1.5, 3), scala(m(130, 21, 0, 5, 0), 1.5), scala(m(25, 1.5, 4, 0.3, 2.5), 2), scala(m(390, 33, 0, 28, 0), 0.2))),
     assunzioni: ['Verdure = 200g miste*'] },
-  'pranzo-6': { // 100g pasta + 150g legumi · pomodori insalata · 2 uova + 150g albume · 20g parmigiano
-    macro: arrotonda(somma(m(355, 12, 71, 1.5, 3), scala(m(90, 7, 14, 0.6, 6.5), 1.5), scala(m(18, 1.1, 2.8, 0.2, 1.1), 1.5), scala(m(155, 12.5, 1, 11, 0), 1.2), scala(m(52, 10.8, 0.7, 0.2, 0), 1.5), scala(m(390, 33, 0, 28, 0), 0.2))),
+  'pranzo-6': { // 80g pasta + 150g legumi · pomodori insalata · 2 uova + 150g albume · 20g parmigiano
+    macro: arrotonda(somma(scala(m(355, 12, 71, 1.5, 3), 0.8), scala(m(90, 7, 14, 0.6, 6.5), 1.5), scala(m(18, 1.1, 2.8, 0.2, 1.1), 1.5), scala(m(155, 12.5, 1, 11, 0), 1.2), scala(m(52, 10.8, 0.7, 0.2, 0), 1.5), scala(m(390, 33, 0, 28, 0), 0.2))),
     assunzioni: ['Pomodori e insalata = 150g*'] },
-  'pranzo-7': { // 120g pasta · 100g tonno · 10g olio · pomodorini · 20g parmigiano
-    macro: arrotonda(somma(scala(m(355, 12, 71, 1.5, 3), 1.2), m(100, 23.5, 0, 0.6, 0), m(90, 0, 0, 10, 0), m(20, 1, 3.5, 0.2, 1), scala(m(390, 33, 0, 28, 0), 0.2))),
+  'pranzo-7': { // 100g pasta · 100g tonno · 10g olio · pomodorini · 20g parmigiano
+    macro: arrotonda(somma(m(355, 12, 71, 1.5, 3), m(100, 23.5, 0, 0.6, 0), m(90, 0, 0, 10, 0), m(20, 1, 3.5, 0.2, 1), scala(m(390, 33, 0, 28, 0), 0.2))),
     assunzioni: ['Pomodorini = 100g*'] },
-  'pranzo-8': { // 120g pasta o riso · 100g ricotta · 100g affettato magro · verdure · 20g parmigiano
-    macro: arrotonda(somma(scala(m(355, 12, 71, 1.5, 3), 1.2), m(145, 11, 3.5, 10, 0), m(150, 32, 0.5, 2, 0), scala(m(25, 1.5, 4, 0.3, 2.5), 2), scala(m(390, 33, 0, 28, 0), 0.2))),
+  'pranzo-8': { // 100g pasta o riso · 100g ricotta · 100g affettato magro · verdure · 20g parmigiano
+    macro: arrotonda(somma(m(355, 12, 71, 1.5, 3), m(145, 11, 3.5, 10, 0), m(150, 32, 0.5, 2, 0), scala(m(25, 1.5, 4, 0.3, 2.5), 2), scala(m(390, 33, 0, 28, 0), 0.2))),
     assunzioni: ['Scelta pasta (il riso sposta poco)', 'Verdure = 200g miste*'] },
   // SPUNTINO
   'spuntino-1': { // 1 frutto · 10g frutta secca · 35g proteine

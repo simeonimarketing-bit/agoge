@@ -22,9 +22,26 @@ const VUOTO: Stato = {
   noteCheckIn: '',
 }
 
-export function oggiISO(): string {
-  const d = new Date()
+// ————— Date: sempre in ora LOCALE, mai toISOString() —————
+// toISOString() converte in UTC: la mezzanotte italiana diventa le 22/23 del giorno prima
+// e ogni "settimana", "media a 7 giorni" e "da lunedì" scivola di un giorno.
+export function isoLocale(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+export const oggiISO = () => isoLocale(new Date())
+export function aggiungiGiorni(iso: string, n: number): string {
+  const d = new Date(iso + 'T00:00:00')
+  d.setDate(d.getDate() + n)
+  return isoLocale(d)
+}
+// lunedì della settimana che contiene la data
+export function lunediDi(iso: string): string {
+  const d = new Date(iso + 'T00:00:00')
+  return aggiungiGiorni(iso, -((d.getDay() + 6) % 7))
+}
+// giorni interi tra due date ISO (b − a)
+export function giorniTra(a: string, b: string): number {
+  return Math.round((new Date(b + 'T00:00:00').getTime() - new Date(a + 'T00:00:00').getTime()) / 86_400_000)
 }
 
 const DIETA_GIORNO_VUOTA: DietaGiorno = {
