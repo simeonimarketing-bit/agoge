@@ -1,164 +1,39 @@
 import { useState } from 'react'
-import { CHECKS, PROSSIMO_CHECK, PARAMETRI_GRAFICABILI } from '../data/checks'
-import { DIETA_INIZIO } from '../data/dieta'
-import { fmtData, settimanaCorrente, programmaAttivo, mediaMobile7 } from '../lib/progression'
+import { CHECKS, PROSSIMO_CHECK } from '../data/checks'
+import { fmtData, mediaMobile7 } from '../lib/progression'
 import { BigNum, Spark, Stepper } from '../components/comuni'
-import { oggiISO, useStore, aggiungiGiorni, giorniTra } from '../lib/store'
+import { oggiISO, useStore } from '../lib/store'
+import type { Check as Misure } from '../types'
 
-const MESI = ['GEN', 'FEB', 'MAR', 'APR', 'MAG', 'GIU', 'LUG', 'AGO', 'SET', 'OTT', 'NOV', 'DIC']
-const label = (iso: string) => MESI[Number(iso.slice(5, 7)) - 1]
-const labelLunga = (iso: string) => `${MESI[Number(iso.slice(5, 7)) - 1].toLowerCase()} ${iso.slice(0, 4)}`
-
+const PARAMETRI: { key: keyof Omit<Misure, 'data'>; nome: string; unita: string }[] = [
+  { key: 'peso', nome: 'Peso', unita: 'kg' }, { key: 'vita', nome: 'Vita', unita: 'cm' }, { key: 'bf', nome: 'Massa grassa', unita: '%' },
+  { key: 'lbm', nome: 'Massa magra', unita: 'kg' }, { key: 'fm', nome: 'Massa grassa', unita: 'kg' }, { key: 'bmr', nome: 'BMR', unita: 'kcal' },
+  { key: 'fianchi', nome: 'Fianchi', unita: 'cm' }, { key: 'torace', nome: 'Torace', unita: 'cm' }, { key: 'braccioSx', nome: 'Braccio sx', unita: 'cm' },
+  { key: 'braccioDx', nome: 'Braccio dx', unita: 'cm' }, { key: 'gambaSx', nome: 'Gamba sx', unita: 'cm' }, { key: 'gambaDx', nome: 'Gamba dx', unita: 'cm' }, { key: 'spalle', nome: 'Spalle', unita: 'cm' },
+]
 export default function Check() {
   const { stato, invia } = useStore()
-  const ospite = stato.profilo.ospite
-  const ultimo = CHECKS[CHECKS.length - 1]
-  const primo = CHECKS[0]
+  const perData = new Map<string, Partial<Misure> & { data: string }>()
+  for (const c of [...(stato.profilo.ospite ? [] : CHECKS), ...stato.checksUtente]) perData.set(c.data, { ...perData.get(c.data), ...c })
+  const checks = [...perData.values()].sort((a, b) => a.data.localeCompare(b.data))
   const oggi = oggiISO()
-  const giorniAlCheck = giorniTra(oggi, PROSSIMO_CHECK.data)
-
-  // pesata quotidiana + media mobile
-  const pesataOggi = stato.pesate[oggi]
-  const [peso, setPeso] = useState<number>(pesataOggi ?? ultimo?.peso ?? 75)
+  const [peso, setPeso] = useState(stato.pesate[oggi] ?? checks.at(-1)?.peso ?? 75)
   const media = mediaMobile7(stato.pesate, oggi)
-  const settimanaScorsa = mediaMobile7(stato.pesate, aggiungiGiorni(oggi, -7))
-  const pesateOrdinate = Object.entries(stato.pesate).sort((a, b) => a[0].localeCompare(b[0]))
-
-  // contesto del mesociclo
-  const programma = programmaAttivo(stato)
-  const sett = settimanaCorrente(programma)
-  const giorniDieta = giorniTra(DIETA_INIZIO, oggi)
-  const mesiDiCheck = Math.round(giorniTra(primo.data, ultimo.data) / 30.4)
-
-  const delta = (k: 'peso' | 'vita' | 'bf' | 'lbm') => {
-    const d = ultimo[k] - primo[k]
-    return `${d > 0 ? '+' : ''}${(Math.round(d * 10) / 10).toLocaleString('it-IT')}`
-  }
-
-  return (
-    <div className="screen stack" style={{ gap: 16 }}>
-      <header>
-        <span className="kicker">{ospite ? 'Il tuo corpo, misurato' : `${CHECKS.length} check · ${labelLunga(primo.data)} → ${labelLunga(ultimo.data)} · Dott. Pappa`}</span>
-        <h1 className="display" style={{ fontSize: '2.4rem', lineHeight: 1, marginTop: 6 }}>
-          Il check<span style={{ color: 'var(--fire)' }}>.</span>
-        </h1>
-      </header>
-
-      {/* pesata quotidiana: la media settimanale è il numero leggibile */}
-      <div className="card card--knurled">
-        <div style={{ paddingLeft: 8 }}>
-          <div className="row row--between" style={{ flexWrap: 'wrap', gap: 10 }}>
-            <div>
-              <span className="tiny kicker">Pesata di oggi</span>
-              <div className="row" style={{ gap: 10, marginTop: 6 }}>
-                <Stepper value={peso} step={0.1} onChange={setPeso} format={v => v.toFixed(1).replace('.', ',')} />
-                <button className="btn btn--fire" style={{ width: 'auto', minHeight: 56 }}
-                  onClick={() => invia({ t: 'pesata', data: oggi, kg: Math.round(peso * 10) / 10 })}>
-                  {pesataOggi !== undefined ? '✓' : 'Salva'}
-                </button>
-              </div>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <span className="tiny kicker">Media 7 giorni</span>
-              <div>
-                <BigNum v={media !== null ? media.toFixed(1).replace('.', ',') : '—'} u="kg" size={2.1} fire={media !== null} />
-              </div>
-              {media !== null && settimanaScorsa !== null && (
-                <div className="tiny fade-dim">
-                  vs sett. scorsa: {media - settimanaScorsa >= 0 ? '+' : ''}{(media - settimanaScorsa).toFixed(1).replace('.', ',')} kg
-                </div>
-              )}
-            </div>
-          </div>
-          {pesateOrdinate.length >= 2 && (
-            <div style={{ marginTop: 8 }}>
-              <Spark punti={pesateOrdinate.slice(-14).map(([, v]) => v)}
-                etichette={pesateOrdinate.slice(-14).map(([d]) => fmtData(d).slice(0, 5))} />
-            </div>
-          )}
-          <p className="tiny" style={{ color: 'var(--dim)', marginTop: 6 }}>
-            La pesata quotidiana oscilla: leggi la media, non il singolo giorno. Il check ufficiale resta quello del coach.
-          </p>
-        </div>
-      </div>
-
-      {/* contesto */}
-      <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-        <span className="pill">Mesociclo: sett. {sett.n}/{sett.totale}</span>
-        {!ospite && <span className="pill">Dieta: giorno {giorniDieta + 1}</span>}
-        {!ospite && <span className="pill">Fase: off-season</span>}
-        {!ospite && (giorniAlCheck === 0
-          ? <span className="pill pill--fire">Check oggi · {PROSSIMO_CHECK.ora}</span>
-          : giorniAlCheck > 0
-            ? <span className="pill pill--fire">Check ufficiale: −{giorniAlCheck}g</span>
-            : <span className="pill">Prossimo check: col nuovo PDF</span>)}
-      </div>
-
-      {!ospite && (
-        <>
-          <div className="card">
-            <span className="tiny kicker">{mesiDiCheck} mesi in numeri — dal primo all'ultimo check del coach</span>
-            <div className="row" style={{ marginTop: 10, justifyContent: 'space-between' }}>
-              <div><BigNum v={delta('peso')} u="kg" size={1.5} /><div className="tiny kicker">peso</div></div>
-              <div><BigNum v={delta('bf')} u="%" size={1.5} fire /><div className="tiny kicker">grasso</div></div>
-              <div><BigNum v={delta('lbm')} u="kg" size={1.5} /><div className="tiny kicker">magra</div></div>
-              <div><BigNum v={delta('vita')} u="cm" size={1.5} /><div className="tiny kicker">vita</div></div>
-            </div>
-          </div>
-
-          {PARAMETRI_GRAFICABILI.map(p => (
-            <div key={p.key} className="card">
-              <div className="row row--between">
-                <span className="tiny kicker">{p.label} ({p.unit})</span>
-                <span className="small" style={{ fontFamily: 'var(--display)' }}>
-                  {ultimo[p.key].toLocaleString('it-IT')}<span className="tiny fade-dim"> {p.unit}</span>
-                </span>
-              </div>
-              <Spark punti={CHECKS.map(c => c[p.key])} etichette={CHECKS.map(c => label(c.data))} />
-            </div>
-          ))}
-
-          <div className="card" style={{ overflowX: 'auto', padding: 0 }}>
-            <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.78rem' }}>
-              <thead>
-                <tr>
-                  <th style={th}>Parametro</th>
-                  {CHECKS.map(c => <th key={c.data} style={th}>{label(c.data)}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {([
-                  ['Peso (kg)', (c: typeof ultimo) => c.peso],
-                  ['BF (%)', c => c.bf],
-                  ['Massa grassa (kg)', c => c.fm],
-                  ['Massa magra (kg)', c => c.lbm],
-                  ['BMR (kcal)', c => c.bmr],
-                  ['Vita (cm)', c => c.vita],
-                  ['Fianchi (cm)', c => c.fianchi],
-                  ['Torace (cm)', c => c.torace],
-                  ['Braccio dx (cm)', c => c.braccioDx],
-                  ['Gamba dx (cm)', c => c.gambaDx],
-                  ['Spalle (cm)', c => c.spalle],
-                ] as [string, (c: typeof ultimo) => number][]).map(([nome, f]) => (
-                  <tr key={nome}>
-                    <td style={{ ...td, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{nome}</td>
-                    {CHECKS.map(c => <td key={c.data} style={td}>{f(c).toLocaleString('it-IT')}</td>)}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <p className="tiny" style={{ color: 'var(--dim)' }}>
-            Su peso e vita il trend è reale. Braccia e gambe sono misure al mezzo centimetro:
-            sotto quella soglia è rumore, non un cambiamento. Il BMI non viene graficato:
-            con questa massa magra è solo il peso riscalato.
-          </p>
-        </>
-      )}
-    </div>
-  )
+  const pesate = Object.entries(stato.pesate).sort(([a], [b]) => a.localeCompare(b)).slice(-14)
+  return <div className="screen stack" style={{ gap: 16 }}>
+    <header><span className="kicker">Il tuo corpo, misurato · {checks.length} check</span><h1 className="display" style={{ fontSize: '2.4rem' }}>Il check<span style={{ color: 'var(--fire)' }}>.</span></h1></header>
+    <section className="card stack"><span className="kicker">Pesata di oggi</span><div className="row" style={{ gap: 10, flexWrap: 'wrap' }}><Stepper value={peso} step={0.1} min={1} onChange={setPeso} format={v => v.toLocaleString('it-IT')} /><button className="btn btn--fire" style={{ width: 'auto' }} onClick={() => invia({ t: 'pesata', data: oggi, kg: peso })}>{stato.pesate[oggi] !== undefined ? 'Aggiorna' : 'Salva'}</button></div>
+      <div><BigNum v={media?.toLocaleString('it-IT') ?? '—'} u="kg" size={2} /><span className="small fade-dim"> · media degli ultimi 7 giorni</span></div>
+      {pesate.length > 1 && <Spark punti={pesate.map(([, v]) => v)} etichette={pesate.map(([d]) => fmtData(d))} />}
+    </section>
+    {!stato.profilo.ospite && !stato.checksUtente.length && <p className="small fade-dim">Prossimo check: {fmtData(PROSSIMO_CHECK.data)} · {PROSSIMO_CHECK.ora}</p>}
+    {!checks.length && <p className="card small">Carica il PDF del tuo check da Sala → Importa PDF. Le misure compariranno qui con tabella e grafici.</p>}
+    {PARAMETRI.filter(p => ['peso', 'vita', 'bf', 'lbm'].includes(p.key)).map(p => {
+      const misure = checks.flatMap(c => typeof c[p.key] === 'number' ? [{ data: c.data, v: c[p.key]! }] : [])
+      return misure.length > 0 && <section key={p.key} className="card"><div className="row row--between"><span className="kicker">{p.nome} ({p.unita})</span><b>{misure.at(-1)!.v.toLocaleString('it-IT')}</b></div>
+        {misure.length > 1 ? <Spark punti={misure.map(c => c.v)} etichette={misure.map(c => fmtData(c.data))} /> : <p className="tiny fade-dim">{fmtData(misure[0].data)} · il grafico apparirà dal secondo check.</p>}
+      </section>
+    })}
+    {checks.length > 0 && <div className="card" style={{ overflowX: 'auto' }}><table className="workout-table"><caption className="kicker">Misure dei check</caption><thead><tr><th>Parametro</th>{checks.map(c => <th key={c.data}>{fmtData(c.data)}</th>)}</tr></thead><tbody>{PARAMETRI.filter(p => checks.some(c => c[p.key] !== undefined)).map(p => <tr key={p.key}><th>{p.nome} ({p.unita})</th>{checks.map(c => <td key={c.data}>{c[p.key]?.toLocaleString('it-IT') ?? '—'}</td>)}</tr>)}</tbody></table><p className="tiny fade-dim">“—” indica una misura non presente nel documento.</p></div>}
+  </div>
 }
-
-const th: React.CSSProperties = { padding: '9px 10px', textAlign: 'left', borderBottom: '1px solid var(--line)', color: 'var(--dim)', fontSize: '0.62rem', letterSpacing: '0.12em', textTransform: 'uppercase' }
-const td: React.CSSProperties = { padding: '7px 10px', borderBottom: '1px solid var(--line-soft)', fontVariantNumeric: 'tabular-nums' }

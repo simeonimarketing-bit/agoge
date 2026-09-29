@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react'
+import Workouts from './Workouts'
+import ArchivioPdf from './ArchivioPdf'
 import { useStore, oggiISO, lunediDi } from '../lib/store'
 import {
   storicoEsercizio, record, recordReps, fmtData, e1rm, migliorSerie, isAllenante,
@@ -10,7 +12,7 @@ import { SCHEDE_SEED } from '../data/riattivazione'
 import { BigNum, Quote, SparkDoppia } from '../components/comuni'
 import type { Stato, LogSerie } from '../types'
 
-type Vista = 'esercizi' | 'cicli' | 'settimana'
+type Vista = 'archivio' | 'workout' | 'esercizi' | 'cicli' | 'settimana'
 
 // periodo di un programma (per filtrare i log per mesociclo)
 function periodi(stato: Stato) {
@@ -25,7 +27,7 @@ function periodi(stato: Stato) {
     // la scheda del coach e le seed (riattivazione) hanno sempre il loro periodo, anche se non attive
     for (const p of [PROGRAMMA, ...SCHEDE_SEED]) aggiungi({ id: p.id, nome: p.nome, dataInizio: p.dataInizio, dataFine: fineProgramma(p) })
   }
-  aggiungi({ id: attuale.id, nome: attuale.nome, dataInizio: attuale.dataInizio, dataFine: fineProgramma(attuale) })
+  if (attuale.id !== 'vuoto') aggiungi({ id: attuale.id, nome: attuale.nome, dataInizio: attuale.dataInizio, dataFine: fineProgramma(attuale) })
   for (const p of stato.programmiUtente) aggiungi({ id: p.id, nome: p.nome, dataInizio: p.dataInizio, dataFine: fineProgramma(p) })
   return lista.sort((a, b) => a.dataInizio.localeCompare(b.dataInizio))
 }
@@ -175,7 +177,7 @@ function Cicli() {
     if (!periodo) return []
     const perEsercizio = new Map<string, { data: string; serie: LogSerie[] }[]>()
     for (const s of stato.sessioni) {
-      if (s.data < periodo.dataInizio || s.data > periodo.dataFine) continue
+      if (s.programmaId ? s.programmaId !== periodo.id : s.data < periodo.dataInizio || s.data > periodo.dataFine) continue
       for (const e of s.esercizi) {
         if (!perEsercizio.has(e.esercizioId)) perEsercizio.set(e.esercizioId, [])
         perEsercizio.get(e.esercizioId)!.push({ data: s.data, serie: e.serie })
@@ -202,7 +204,7 @@ function Cicli() {
       <div className="stack" style={{ gap: 8 }}>
         <p className="small fade-dim">Tocca una programmazione per l’analisi carichi/reps dei suoi esercizi.</p>
         {[...ps].reverse().map(p => {
-          const n = stato.sessioni.filter(s => s.data >= p.dataInizio && s.data <= p.dataFine).length
+          const n = stato.sessioni.filter(s => s.programmaId ? s.programmaId === p.id : s.data >= p.dataInizio && s.data <= p.dataFine).length
           return (
             <button key={p.id} className="card row row--between" style={{ textAlign: 'left' }} onClick={() => setSel(p.id)}>
               <div>
@@ -282,7 +284,7 @@ function Settimana() {
 // ————— Schermata —————
 export default function Storico() {
   const { stato } = useStore()
-  const [vista, setVista] = useState<Vista>('esercizi')
+  const [vista, setVista] = useState<Vista>('workout')
   const [sel, setSel] = useState<string | null>(null)
   const [filtro, setFiltro] = useState('')
 
@@ -313,12 +315,14 @@ export default function Storico() {
           </header>
           <Quote contesto="storico" />
 
-          <div className="row" style={{ gap: 8 }}>
-            {([['esercizi', 'Esercizi'], ['cicli', 'Cicli'], ['settimana', 'Settimana']] as [Vista, string][]).map(([v, l]) => (
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            {([['workout', 'Workout'], ['archivio', 'Programmazioni'], ['esercizi', 'Esercizi'], ['cicli', 'Cicli'], ['settimana', 'Settimana']] as [Vista, string][]).map(([v, l]) => (
               <button key={v} className={`pill ${vista === v ? 'pill--on' : ''}`} onClick={() => setVista(v)}>{l}</button>
             ))}
           </div>
 
+          {vista === 'workout' && <Workouts />}
+          {vista === 'archivio' && <ArchivioPdf />}
           {vista === 'cicli' && <Cicli />}
           {vista === 'settimana' && <Settimana />}
           {vista === 'esercizi' && (

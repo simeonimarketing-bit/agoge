@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ADDOME } from '../data/programma'
 import { PROSSIMO_CHECK } from '../data/checks'
 import { ALTERNATIVE_COACH } from '../data/muscoli'
@@ -37,7 +37,9 @@ function LogSheet({ p, settimana, avvicinamento, onClose, onRest }: {
 
   const giaLoggato = stato.sessioneCorrente?.esercizi.find(e => e.esercizioId === p.esercizioId)
   const [serie, setSerie] = useState<LogSerie[]>(giaLoggato?.serie ?? [])
-  const [note, setNote] = useState(giaLoggato?.note ?? '')
+  const [note, setNote] = useState(giaLoggato?.note ?? notaPrecedente ?? '')
+  const [modificaNome, setModificaNome] = useState(false)
+  const [nome, setNome] = useState(can.nome)
 
   // la prossima riga del piano è la prossima serie EFFETTIVA (le preparatorie non consumano il piano)
   const idx = serie.filter(isEffettiva).length
@@ -56,7 +58,7 @@ function LogSheet({ p, settimana, avvicinamento, onClose, onRest }: {
   const [vediTipi, setVediTipi] = useState(false)
 
   const persisti = (agg: LogSerie[], n = note) =>
-    invia({ t: 'logga-esercizio', log: { esercizioId: p.esercizioId, serie: agg, note: n.trim() || undefined } })
+    invia({ t: 'logga-esercizio', log: { esercizioId: p.esercizioId, nome: can.nome, prescrizione: blocchi, serie: agg, note: n.trim() || undefined } })
 
   function salva(s: LogSerie) {
     const agg = [...serie, s]
@@ -88,6 +90,7 @@ function LogSheet({ p, settimana, avvicinamento, onClose, onRest }: {
 
   function salvaNote(testo: string) {
     setNote(testo)
+    invia({ t: 'nota-esercizio', id: p.esercizioId, testo })
     if (serie.length > 0) persisti(serie, testo)
   }
 
@@ -102,6 +105,12 @@ function LogSheet({ p, settimana, avvicinamento, onClose, onRest }: {
         <div>
           <div className="kicker">{blocchi.map(fmtBlocco).join(' + ')}{p.rest ? ` · rest ${p.rest}"` : ''}</div>
           <h2 style={{ fontSize: '1.35rem', fontWeight: 800, marginTop: 2, lineHeight: 1.15 }}>{can.nome}</h2>
+          <button className="small fade-dim" onClick={() => setModificaNome(v => !v)}>✎ Personalizza nome</button>
+          {modificaNome && <form className="stack" onSubmit={e => { e.preventDefault(); if (!nome.trim()) return; invia({ t: 'nome-esercizio', id: p.esercizioId, testo: nome }); setModificaNome(false) }}>
+            <label className="small">Nome del macchinario<input aria-label="Nome personalizzato" maxLength={120} value={nome} onChange={e => setNome(e.target.value)} /></label>
+            <span className="tiny fade-dim">Nel PDF: {p.nomePdf}. Lo storico resta collegato a questo esercizio.</span>
+            <button className="btn" disabled={!nome.trim()}>Salva nome</button>
+          </form>}
           {p.note && <div className="small fade-dim">{p.note}</div>}
         </div>
 
@@ -166,7 +175,7 @@ function LogSheet({ p, settimana, avvicinamento, onClose, onRest }: {
           </div>
           <div>
             <div className="tiny kicker" style={{ marginBottom: 4 }}>Reps</div>
-            <Stepper value={reps} step={1} min={1} onChange={setReps} />
+            <Stepper value={reps} step={0.5} min={0.5} onChange={v => setReps(Math.round(v * 2) / 2)} format={fmtCarico} />
           </div>
         </div>
 
@@ -206,12 +215,11 @@ function LogSheet({ p, settimana, avvicinamento, onClose, onRest }: {
             </button>
           )}
         </div>
-        <input
-          style={{ padding: '10px 12px', fontSize: '0.9rem', width: '100%' }}
-          placeholder="Regolazioni: sedile, presa, macchina… (si ricordano)"
-          value={note}
-          onChange={e => salvaNote(e.target.value)}
-        />
+        <section className="card stack exercise-notes">
+          <label htmlFor="exercise-note" className="kicker">Le tue note · per la prossima volta</label>
+          <textarea id="exercise-note" rows={4} placeholder="Sedile, presa, sensazioni e cosa ricordare…" value={note} onChange={e => salvaNote(e.target.value)} />
+          <span className="tiny fade-dim">Salvate automaticamente, anche prima della prima serie.</span>
+        </section>
         <button className="btn btn--ghost" onClick={onClose}>Chiudi</button>
       </div>
     </Sheet>
@@ -230,7 +238,7 @@ function Resoconto({ onChiudi }: { onChiudi: () => void }) {
   const tutteLeSerie = c.esercizi.flatMap(e => e.serie)
   const rir = rirMedio(tutteLeSerie)
 
-  const precedente = [...stato.sessioni].reverse().find(s => s.giornoN === c.giornoN)
+  const precedente = [...stato.sessioni].reverse().find(s => s.giornoN === c.giornoN && s.programmaId === c.programmaId)
   const tonPrec = precedente ? tonnellaggioSessione(precedente) : null
 
   const records: string[] = []
@@ -289,8 +297,9 @@ function Resoconto({ onChiudi }: { onChiudi: () => void }) {
 // ————— Schermata OGGI —————
 export default function Oggi() {
   const { stato, invia } = useStore()
-  const programma = programmaAttivo(stato)
+  const programma = stato.sessioneCorrente?.programmaSnapshot ?? programmaAttivo(stato)
   const sett = settimanaCorrente(programma)
+  if (stato.sessioneCorrente?.settimana) sett.n = stato.sessioneCorrente.settimana
 
   // giorno suggerito: quello dopo l'ultima sessione DI QUESTA scheda (cambiata la scheda, si riparte da G1)
   const ultimaDiQuesta = [...stato.sessioni].reverse().find(s => s.programmaId === programma.id)
@@ -302,6 +311,10 @@ export default function Oggi() {
   const [aperto, setAperto] = useState<string | null>(null)
   const [resoconto, setResoconto] = useState(false)
   const [rest, setRest] = useState<{ secondi: number | null; k: number } | null>(null)
+
+  useEffect(() => {
+    if (!programma.giorni.some(g => g.n === giornoSel)) setGiornoSel(suggerito)
+  }, [programma.id, giornoSel, suggerito])
 
   const giorno = programma.giorni.find(g => g.n === giornoSel) ?? programma.giorni[0]
   const sc = stato.sessioneCorrente
@@ -328,10 +341,11 @@ export default function Oggi() {
   const serieFatte = sc?.esercizi.reduce((n, e) => n + e.serie.filter(isEffettiva).length, 0) ?? 0
   const minuti = sc?.inizio ? Math.round((Date.now() - new Date(sc.inizio).getTime()) / 60000) : 0
 
+  const notaSedutaPrecedente = ultimaDiQuesta && stato.noteWorkout[ultimaDiQuesta.id]
   const oggi = oggiISO()
-  const mostraCheck = !stato.profilo.ospite
+  const mostraCheck = !stato.profilo.ospite && !stato.checksUtente.length
   const giorniAlCheck = giorniTra(oggi, PROSSIMO_CHECK.data)
-  const chiedeAvvicinamento = !programma.custom
+  const chiedeAvvicinamento = programma.avvicinamento ?? !programma.custom
 
   if (!giorno) {
     return (
@@ -383,7 +397,7 @@ export default function Oggi() {
           </div>
         </div>
       ) : !inSessione ? (
-        <button className="btn btn--fire" onClick={() => invia({ t: 'avvia-sessione', giornoN: giorno.n, giornoNome: giorno.nome, programmaId: programma.id })}>
+        <button className="btn btn--fire" onClick={() => invia({ t: 'avvia-sessione', giornoN: giorno.n, giornoNome: giorno.nome, programmaId: programma.id, programmaSnapshot: programma, settimana: sett.n })}>
           Inizia — giorno {giorno.n} · {giorno.nome}
         </button>
       ) : (
@@ -400,12 +414,13 @@ export default function Oggi() {
               </div>
             )}
           </div>
-          <button className="btn btn--fire" disabled={fatti.size === 0} onClick={() => setResoconto(true)}>
+          <button className="btn btn--fire" disabled={fatti.size === 0} onClick={() => { setRest(null); setResoconto(true) }}>
             Chiudi sessione ({fatti.size}/{giorno.prescrizioni.length})
           </button>
         </>
       )}
 
+      {notaSedutaPrecedente && <div className="exercise-note-preview"><b>Promemoria dall’ultimo workout</b><br />{notaSedutaPrecedente}</div>}
       {programma.nota && (
         <div className="card" style={{ borderStyle: 'dashed', background: 'none', padding: '10px 14px' }}>
           <span className="tiny kicker kicker--fire">Regola del ciclo</span>
@@ -416,7 +431,7 @@ export default function Oggi() {
       {giorno.addome && (
         <div className="card" style={{ borderStyle: 'dashed', background: 'none', padding: '10px 14px' }}>
           <span className="tiny kicker kicker--fire">Regola del coach</span>
-          <div className="small" style={{ marginTop: 2 }}><b>Addome prima della sessione</b> — {ADDOME.dettaglio}</div>
+          <div className="small" style={{ marginTop: 2 }}><b>Addome prima della sessione</b> — {programma.custom ? 'Segui le indicazioni riportate dal coach nella scheda.' : ADDOME.dettaglio}</div>
         </div>
       )}
 
@@ -457,7 +472,7 @@ export default function Oggi() {
               style={{ opacity: inAttesa ? 0.55 : 1 }}>
               <button style={{ textAlign: 'left', width: '100%' }} disabled={altraAperta} onClick={() => {
                 if (altraAperta) return
-                if (!inSessione) invia({ t: 'avvia-sessione', giornoN: giorno.n, giornoNome: giorno.nome, programmaId: programma.id })
+                if (!inSessione) invia({ t: 'avvia-sessione', giornoN: giorno.n, giornoNome: giorno.nome, programmaId: programma.id, programmaSnapshot: programma, settimana: sett.n })
                 if (inAttesa) invia({ t: 'riprendi-esercizio', esercizioId: p.esercizioId })
                 setAperto(p.esercizioId)
               }}>
@@ -479,7 +494,7 @@ export default function Oggi() {
                         {tgt.aumento ? '▲ ' : ''}Target: {fmtCarico(tgt.carico)} kg × {tgt.reps}
                       </div>
                     )}
-                    {nota && <div className="tiny" style={{ color: 'var(--muted)', marginTop: 3 }}>✎ {nota}</div>}
+                    {nota && <div className="exercise-note-preview">✎ {nota}</div>}
                   </div>
                   <span className="display" style={{ color: isAttivo ? 'var(--fire)' : 'var(--dim)', fontSize: '1.4rem', paddingLeft: 6 }}>›</span>
                 </div>
@@ -488,7 +503,7 @@ export default function Oggi() {
                 <div className="row" style={{ marginTop: 8, paddingLeft: 8, gap: 8, flexWrap: 'wrap' }}>
                   {inAttesa
                     ? <span className="tiny" style={{ color: 'var(--fire)' }}>In attesa — attrezzo occupato</span>
-                    : <button className="tiny fade-dim" onClick={() => invia({ t: 'rimanda-esercizio', esercizioId: p.esercizioId })}>
+                    : <button className="tiny fade-dim" onClick={() => { if (confirm(`Rimandare ${can.nome} alla fine della seduta?`)) invia({ t: 'rimanda-esercizio', esercizioId: p.esercizioId }) }}>
                         ⟳ occupato, rimanda
                       </button>}
                   {alternative.length > 0 && (

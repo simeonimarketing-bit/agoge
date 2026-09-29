@@ -351,3 +351,13 @@ input, textarea {
   .print-area, .print-area * { visibility: visible; }
   .print-area { position: absolute; inset: 0; padding: 24px; color: #000; }
 }
+
+.exercise-notes textarea, .stack label input { width: 100%; padding: 12px; font: inherit; }
+.exercise-notes textarea { min-height: 120px; resize: vertical; }
+.exercise-note-preview { white-space: pre-wrap; margin-top: 10px; padding: 10px 12px; border-left: 3px solid var(--fire); background: var(--surface-2); font-size: .9rem; }
+.workout-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.workout-table th, .workout-table td { text-align: left; padding: 9px 5px; border-bottom: 1px solid var(--line); }
+
+.stack select { width: 100%; padding: 12px; background: var(--surface-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+.stack details summary { cursor: pointer; padding: 6px 0; }
+.stack label input[type="checkbox"] { width: auto; }

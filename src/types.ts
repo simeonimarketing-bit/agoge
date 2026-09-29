@@ -43,6 +43,8 @@ export interface Programma {
   pdfSorgente?: string
   giorni: GiornoProgramma[]
   nota?: string // regola valida per tutto il ciclo, mostrata in Oggi
+  soloArchivio?: boolean // non selezionare automaticamente come scheda attiva
+  avvicinamento?: boolean
   custom?: boolean // creato con l'editor in-app
 }
 
@@ -67,6 +69,8 @@ export interface LogSerie {
 
 export interface LogEsercizio {
   esercizioId: string
+  nome?: string
+  prescrizione?: Blocco[]
   serie: LogSerie[]
   note?: string
 }
@@ -77,6 +81,8 @@ export interface Sessione {
   giornoN: number
   giornoNome: string
   programmaId?: string
+  programmaSnapshot?: Programma
+  settimana?: number
   esercizi: LogEsercizio[]
   inizio?: string // ISO datetime
   fine?: string
@@ -127,7 +133,7 @@ export interface OpzionePasto {
 }
 
 export interface Pasto {
-  id: 'colazione' | 'pranzo' | 'spuntino' | 'cena'
+  id: string
   nome: string
   nota?: string
   opzioni: OpzionePasto[]
@@ -159,13 +165,29 @@ export interface DietaGiorno {
 }
 
 export interface Profilo {
+  inizializzato?: boolean
   ospite: boolean // true = amico: niente dati seed di Salvatore
   nome?: string
   dietaLibera: boolean // logging alimentare senza opzioni
   programmaAttivoId?: string
 }
 
+export interface DocumentoPdf {
+  id: string
+  nome: string
+  titolo: string
+  dimensione: number
+  caricatoIl: string
+  dataDocumento?: string
+  categoria: 'allenamento' | 'alimentazione' | 'check' | 'misto' | 'da-classificare'
+  stato: 'da-leggere' | 'importato'
+  programmi: string[]
+  piani: string[]
+  checks: string[]
+}
+
 export interface Stato {
+  documentiPdf: DocumentoPdf[]
   versione: 2
   profilo: Profilo
   sessioni: Sessione[]
@@ -176,5 +198,11 @@ export interface Stato {
   programmiUtente: Programma[] // creati con l'editor
   canoniciUtente: EsercizioCanonico[] // esercizi custom
   alimentiUtente: Alimento[] // alimenti aggiunti a mano
+  checksUtente: (Partial<Check> & { data: string })[]
+  pianiAlimentari: { id: string; nome: string; dataInizio: string; note?: string; pasti: Pasto[] }[]
+  pianoAlimentareId?: string
+  nomiEsercizi: Record<string, string>
+  noteEsercizi: Record<string, string>
+  noteWorkout: Record<string, string>
   noteCheckIn: string // note e fastidi per il prossimo check-in
 }

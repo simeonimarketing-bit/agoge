@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { StoreProvider } from './lib/store'
+import { StoreProvider, useStore } from './lib/store'
 import Oggi from './screens/Oggi'
 import Storico from './screens/Storico'
 import Dieta from './screens/Dieta'
@@ -61,10 +61,20 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'altro', label: 'Sala' },
 ]
 
-export default function App() {
+function Contenuto() {
+  const { stato, invia } = useStore()
+  const [nome, setNome] = useState('')
   const [tab, setTab] = useState<Tab>('oggi')
+  if (!stato.profilo.inizializzato) return <main className="screen stack" style={{ paddingTop: 60 }}>
+    <span className="kicker">Benvenuto</span><h1 className="display" style={{ fontSize: '3rem' }}>AGOGE.</h1>
+    <p>La tua scheda, i tuoi allenamenti e i tuoi progressi.</p>
+    <label className="small">Come ti chiami? (facoltativo)<input value={nome} onChange={e => setNome(e.target.value)} maxLength={80} /></label>
+    <button className="btn btn--fire" onClick={() => invia({ t: 'profilo', patch: { inizializzato: true, ospite: true, dietaLibera: true, nome: nome.trim() } })}>Inizia con i miei dati</button>
+    <p className="small fade-dim">Parti da una scheda vuota. Puoi caricare i PDF in Sala. I dati vengono salvati su questo dispositivo.</p>
+    <button className="btn btn--ghost" onClick={() => invia({ t: 'profilo', patch: { inizializzato: true, ospite: false, dietaLibera: false, nome: 'Salvatore' } })}>Sono Salvatore · usa il mio programma</button>
+  </main>
   return (
-    <StoreProvider>
+    <>
       {tab === 'oggi' && <Oggi />}
       {tab === 'storico' && <Storico />}
       {tab === 'dieta' && <Dieta />}
@@ -78,6 +88,10 @@ export default function App() {
           </button>
         ))}
       </nav>
-    </StoreProvider>
+    </>
   )
+}
+
+export default function App() {
+  return <StoreProvider><Contenuto /></StoreProvider>
 }

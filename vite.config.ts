@@ -5,6 +5,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 export default defineConfig({
   // in deploy (GitHub Pages) la base è /<nome-repo>/; in locale resta /
   base: process.env.DEPLOY_BASE ?? '/',
+  server: { proxy: { '/api': 'http://127.0.0.1:3001' } },
   plugins: [
     react(),
     VitePWA({
@@ -25,7 +26,8 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,png,woff2,svg}'],
+        globPatterns: ['**/*.{js,mjs,css,html,png,woff2,svg}'],
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
       },
     }),
   ],

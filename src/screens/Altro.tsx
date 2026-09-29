@@ -1,4 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
+import ImportaPdf from './ImportaPdf'
+import ArchivioPdf from './ArchivioPdf'
+import { ripristinaPdf } from '../lib/pdf-archive'
 import { REGOLE_GLOBALI, PROGRAMMA } from '../data/programma'
 import { CHECKS } from '../data/checks'
 import { SCHEDE_SEED } from '../data/riattivazione'
@@ -27,16 +30,21 @@ function generaCheckIn(stato: Stato): string {
     r.push(`PESO`)
     r.push(`• Media 7 giorni: ${media.toFixed(1)} kg${mediaPrec !== null ? ` (${media - mediaPrec >= 0 ? '+' : ''}${(media - mediaPrec).toFixed(1)} vs settimana scorsa)` : ''}`)
   }
-  if (!stato.profilo.ospite && CHECKS.length) {
-    const u = CHECKS[CHECKS.length - 1]
-    r.push(`• Ultimo check ufficiale (${fmtData(u.data)}): ${u.peso} kg · vita ${u.vita} · BF ${u.bf}% · LBM ${u.lbm} kg`)
+  const ultimoCheck = [...(stato.profilo.ospite ? [] : CHECKS), ...stato.checksUtente].sort((a, b) => a.data.localeCompare(b.data)).at(-1)
+  if (ultimoCheck) {
+    const u = ultimoCheck
+    r.push(`• Ultimo check ufficiale (${fmtData(u.data)}): peso ${u.peso ?? '—'} kg · vita ${u.vita ?? '—'} · BF ${u.bf ?? '—'}% · LBM ${u.lbm ?? '—'} kg`)
   }
   r.push('')
 
   // aderenza dieta ultimi 7 giorni
   const giorniDieta = Object.entries(stato.dieta).filter(([d]) => d > settimanaFa && d <= oggi)
   if (giorniDieta.length) {
-    const completi = giorniDieta.filter(([, g]) => Object.keys(g.pasti).length >= 4).length
+    const completi = giorniDieta.filter(([data, g]) => {
+      const piano = [...stato.pianiAlimentari].filter(p => p.dataInizio <= data).sort((a, b) => a.dataInizio.localeCompare(b.dataInizio)).at(-1)
+      const ids = piano?.pasti.map(p => p.id) ?? (stato.profilo.ospite ? [] : ['colazione', 'pranzo', 'spuntino', 'cena'])
+      return ids.length > 0 && ids.every(id => g.pasti[id] !== undefined)
+    }).length
     const sgarri = giorniDieta.filter(([, g]) => g.sgarro).length
     const libere = giorniDieta.reduce((n, [, g]) => n + (g.libere?.length ?? 0), 0)
     r.push(`DIETA (ultimi 7 giorni)`)
@@ -47,7 +55,7 @@ function generaCheckIn(stato: Stato): string {
 
   // allenamento
   const programma = programmaAttivo(stato)
-  const sessCiclo = stato.sessioni.filter(s => s.data >= programma.dataInizio)
+  const sessCiclo = stato.sessioni.filter(s => s.programmaId === programma.id)
   if (sessCiclo.length) {
     const ton = sessCiclo.reduce((t, s) => t + tonnellaggioSessione(s), 0)
     const t = fmtKg(ton)
@@ -137,6 +145,7 @@ function EditorScheda({ esistente, onClose }: { esistente: Programma | null; onC
   function salva() {
     if (!nome.trim() || giorni.length === 0) return
     const p: Programma = {
+      ...esistente,
       id: esistente?.id ?? 'scheda-' + Date.now(),
       nome: nome.trim(), dataInizio, durataSettimane: settimane, giorni, custom: true,
     }
@@ -226,7 +235,10 @@ export default function Altro() {
   const [copiato, setCopiato] = useState(false)
   const [editor, setEditor] = useState<null | { programma: Programma | null }>(null)
   const programma = programmaAttivo(stato)
-  const flags = programma.giorni.flatMap(g => g.prescrizioni.filter(p => p.flag).map(p => ({ g: g.n, p })))
+  const [importaPdf, setImportaPdf] = useState(false)
+  const [archivio, setArchivio] = useState(false)
+  const [backupBusy, setBackupBusy] = useState(false)
+  const [backupErrore, setBackupErrore] = useState('')
   const testoCheckIn = useMemo(() => generaCheckIn(stato), [stato])
 
   async function copiaCheckIn() {
@@ -235,24 +247,32 @@ export default function Altro() {
     setTimeout(() => setCopiato(false), 2500)
   }
 
-  function importaBackup(f: File) {
-    const reader = new FileReader()
-    reader.onload = () => {
-      try {
-        const dati = JSON.parse(String(reader.result)) as Stato
-        invia({ t: 'importa', stato: dati })
-        alert('Backup ripristinato.')
-      } catch {
-        alert('File non valido: serve un backup esportato da AGOGE.')
-      }
-    }
-    reader.readAsText(f)
+  async function importaBackup(f: File) {
+    setBackupBusy(true); setBackupErrore('')
+    try {
+      const dati = JSON.parse(await f.text())
+      if (!dati || !Array.isArray(dati.sessioni) || typeof dati.dieta !== 'object') throw new Error('Serve un backup esportato da AGOGE.')
+      await ripristinaPdf(dati.pdfOriginali, dati.documentiPdf ?? [])
+      const { pdfOriginali: _pdf, ...statoImportato } = dati
+      invia({ t: 'importa', stato: statoImportato as Stato })
+      alert('Backup ripristinato, inclusi i PDF disponibili.')
+    } catch (e) { setBackupErrore(e instanceof Error ? e.message : 'Backup non valido.') }
+    finally { setBackupBusy(false) }
+  }
+
+  async function esporta() {
+    setBackupBusy(true); setBackupErrore('')
+    try { await esportaBackup(stato) }
+    catch (e) { setBackupErrore(e instanceof Error ? e.message : 'Esportazione non riuscita.') }
+    finally { setBackupBusy(false) }
   }
 
   function modalitaOspite() {
     if (!confirm('Modalità ospite: nasconde la scheda e i check di Salvatore. I tuoi dati restano su questo dispositivo. Continuare?')) return
     invia({ t: 'profilo', patch: { ospite: true, dietaLibera: true } })
   }
+
+  if (archivio) return <div className="screen stack"><button className="small fade-dim" style={{ textAlign: 'left' }} onClick={() => setArchivio(false)}>‹ Torna alla Sala</button><ArchivioPdf /></div>
 
   return (
     <div className="screen stack" style={{ gap: 16 }}>
@@ -350,28 +370,15 @@ export default function Altro() {
         )}
       </div>
 
-      {/* import nuovo ciclo */}
-      {!stato.profilo.ospite && (
-        <div className="card">
-          <span className="tiny kicker">Import nuovo ciclo</span>
-          <p className="small fade-dim" style={{ marginTop: 4 }}>
-            Quando il Dott. Pappa manda i nuovi PDF: mettili in <b>Check e Prog</b>, apri Claude Code e scrivi
-            «importa il nuovo ciclo». L'AI propone, tu confermi. Due minuti ogni cinque settimane.
-          </p>
-          {flags.length > 0 && (
-            <details style={{ marginTop: 8 }}>
-              <summary className="small" style={{ color: 'var(--fire)', cursor: 'pointer' }}>
-                {flags.length} anomalie risolte alla conferma dell'import
-              </summary>
-              <ul className="small fade-dim" style={{ paddingLeft: 18, marginTop: 6 }}>
-                {flags.map(({ g, p }, i) => (
-                  <li key={i} style={{ marginBottom: 4 }}>G{g} · {canonico(stato, p.esercizioId)?.nome}: {p.flag}</li>
-                ))}
-              </ul>
-            </details>
-          )}
-        </div>
-      )}
+      <div className="card stack">
+        <span className="kicker">I tuoi documenti</span>
+        <p className="small fade-dim">Carica schede, piani alimentari e check, anche vecchi. Nell’archivio trovi tutte le tue programmazioni.</p>
+        <button className="btn btn--fire" onClick={() => setImportaPdf(true)}>Importa PDF</button>
+        <button className="btn" onClick={() => setArchivio(true)}>Archivio programmazioni</button>
+      </div>
+      {stato.pianiAlimentari.length > 0 && <div className="card stack"><label className="small">Piano alimentare attivo<select value={stato.pianoAlimentareId ?? ''} onChange={e => invia({ t: 'seleziona-dieta', id: e.target.value })}>{stato.pianiAlimentari.map(p => <option key={p.id} value={p.id}>{p.nome} · {fmtData(p.dataInizio)}</option>)}</select></label></div>}
+      {importaPdf && <ImportaPdf onClose={() => setImportaPdf(false)} onArchiviato={() => { setImportaPdf(false); setArchivio(true) }} />}
+
 
       {!stato.profilo.ospite && (
         <div className="card">
@@ -384,6 +391,7 @@ export default function Altro() {
         </div>
       )}
 
+      {backupErrore && <p role="alert">{backupErrore}</p>}
       {/* backup */}
       <div className="card">
         <span className="tiny kicker">I tuoi dati</span>
@@ -392,8 +400,8 @@ export default function Altro() {
           {' '}{Object.keys(stato.pesate).length} pesate. Esporta un backup ogni tanto: lo storico non si ricompra.
         </p>
         <div className="row" style={{ gap: 8, marginTop: 10 }}>
-          <button className="btn" style={{ flex: 1 }} onClick={() => esportaBackup(stato)}>Esporta</button>
-          <button className="btn btn--ghost" style={{ flex: 1 }} onClick={() => fileRef.current?.click()}>Ripristina</button>
+          <button className="btn" style={{ flex: 1 }} disabled={backupBusy} onClick={esporta}>{backupBusy ? 'Attendi…' : 'Esporta'}</button>
+          <button className="btn btn--ghost" style={{ flex: 1 }} disabled={backupBusy} onClick={() => fileRef.current?.click()}>Ripristina</button>
           <input ref={fileRef} type="file" accept="application/json" hidden
             onChange={e => { const f = e.target.files?.[0]; if (f) importaBackup(f) }} />
         </div>

@@ -31,7 +31,7 @@ export function programmaAttivo(stato: Stato): Programma {
     const oggi = oggiISO()
     if (seed && oggi <= fineProgramma(seed) && oggi < PROGRAMMA.dataInizio) return seed
   }
-  if (stato.profilo.ospite) return stato.programmiUtente[0] ?? PROGRAMMA_VUOTO
+  if (stato.profilo.ospite) return stato.programmiUtente.find(p => !p.soloArchivio) ?? PROGRAMMA_VUOTO
   return PROGRAMMA
 }
 
@@ -40,11 +40,12 @@ const PROGRAMMA_VUOTO: Programma = {
 }
 
 export function tuttiICanonici(stato: Stato) {
-  return [...CANONICI, ...stato.canoniciUtente]
+  return [...CANONICI, ...stato.canoniciUtente].map(c => ({ ...c, alias: [...new Set([c.nome, ...c.alias])], nome: stato.nomiEsercizi[c.id] || c.nome }))
 }
 
 export function canonico(stato: Stato, id: string) {
-  return canonicoById(id) ?? stato.canoniciUtente.find(c => c.id === id)
+  const c = canonicoById(id) ?? stato.canoniciUtente.find(c => c.id === id)
+  return c ? { ...c, nome: stato.nomiEsercizi[id] || c.nome } : undefined
 }
 
 // ————— Settimana corrente del ciclo —————
@@ -202,6 +203,7 @@ export function serieEffettiveSessione(s: Sessione): number {
 
 // ultima nota lasciata su un esercizio (regolazioni: sedile, presa, macchina)
 export function ultimaNota(stato: Stato, esercizioId: string): string | null {
+  if (esercizioId in stato.noteEsercizi) return stato.noteEsercizi[esercizioId].trim() || null
   for (let i = stato.sessioni.length - 1; i >= 0; i--) {
     const e = stato.sessioni[i].esercizi.find(x => x.esercizioId === esercizioId)
     if (e?.note?.trim()) return e.note.trim()

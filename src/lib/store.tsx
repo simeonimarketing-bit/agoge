@@ -1,3 +1,6 @@
+import { pdfPerBackup } from './pdf-archive'
+import { PROGRAMMA } from '../data/programma'
+import { SCHEDE_SEED } from '../data/riattivazione'
 import { createContext, useContext, useEffect, useReducer, type ReactNode } from 'react'
 import type {
   Stato, Sessione, LogEsercizio, DietaGiorno, Pasto, Programma,
@@ -6,9 +9,10 @@ import type {
 
 const KEY = 'agoge.v1'
 
-const PROFILO_DEFAULT: Profilo = { ospite: false, dietaLibera: false }
+const PROFILO_DEFAULT: Profilo = { ospite: false, dietaLibera: false, inizializzato: false }
 
-const VUOTO: Stato = {
+export const VUOTO: Stato = {
+  documentiPdf: [],
   versione: 2,
   profilo: PROFILO_DEFAULT,
   sessioni: [],
@@ -19,6 +23,8 @@ const VUOTO: Stato = {
   programmiUtente: [],
   canoniciUtente: [],
   alimentiUtente: [],
+  checksUtente: [], pianiAlimentari: [],
+  nomiEsercizi: {}, noteEsercizi: {}, noteWorkout: {},
   noteCheckIn: '',
 }
 
@@ -50,7 +56,7 @@ const DIETA_GIORNO_VUOTA: DietaGiorno = {
 }
 
 type Azione =
-  | { t: 'avvia-sessione'; giornoN: number; giornoNome: string; programmaId?: string }
+  | { t: 'avvia-sessione'; giornoN: number; giornoNome: string; programmaId?: string; programmaSnapshot?: Programma; settimana?: number }
   | { t: 'annulla-sessione' }
   | { t: 'logga-esercizio'; log: LogEsercizio }
   | { t: 'rimanda-esercizio'; esercizioId: string }
@@ -67,17 +73,24 @@ type Azione =
   | { t: 'elimina-programma'; id: string }
   | { t: 'aggiungi-canonico'; canonico: EsercizioCanonico }
   | { t: 'aggiungi-alimento'; alimento: Alimento }
+  | { t: 'seleziona-dieta'; id: string }
+  | { t: 'salva-documento-pdf'; documento: Stato['documentiPdf'][number] }
+  | { t: 'importa-documento'; attiva?: boolean; documento?: Stato['documentiPdf'][number]; programmi: Programma[]; canonici: EsercizioCanonico[]; checks: Stato['checksUtente']; piani: Stato['pianiAlimentari'] }
+  | { t: 'nome-esercizio'; id: string; testo: string }
+  | { t: 'nota-esercizio'; id: string; testo: string }
+  | { t: 'nota-workout'; id: string; testo: string }
   | { t: 'note-checkin'; testo: string }
   | { t: 'importa'; stato: Stato }
 
-function riduci(s: Stato, a: Azione): Stato {
+export function riduci(s: Stato, a: Azione): Stato {
   switch (a.t) {
     case 'avvia-sessione':
+      if (s.sessioneCorrente) return s
       return {
         ...s,
         sessioneCorrente: {
-          id: String(Date.now()), data: oggiISO(), giornoN: a.giornoN, giornoNome: a.giornoNome,
-          programmaId: a.programmaId, esercizi: [], rimandati: [], inizio: new Date().toISOString(),
+          id: crypto.randomUUID(), data: oggiISO(), giornoN: a.giornoN, giornoNome: a.giornoNome,
+          programmaId: a.programmaId, programmaSnapshot: a.programmaSnapshot, settimana: a.settimana, esercizi: [], rimandati: [], inizio: new Date().toISOString(),
         },
       }
     case 'annulla-sessione':
@@ -155,6 +168,29 @@ function riduci(s: Stato, a: Azione): Stato {
       return { ...s, canoniciUtente: [...s.canoniciUtente.filter(c => c.id !== a.canonico.id), a.canonico] }
     case 'aggiungi-alimento':
       return { ...s, alimentiUtente: [...s.alimentiUtente.filter(x => x.nome !== a.alimento.nome), a.alimento] }
+    case 'seleziona-dieta':
+      return s.pianiAlimentari.some(p => p.id === a.id) ? { ...s, pianoAlimentareId: a.id, profilo: { ...s.profilo, dietaLibera: false } } : s
+    case 'salva-documento-pdf':
+      return { ...s, documentiPdf: [...s.documentiPdf.filter(d => d.id !== a.documento.id), a.documento] }
+    case 'importa-documento': {
+      if (a.documento && s.documentiPdf.some(d => d.id === a.documento!.id && d.stato === 'importato')) return s
+      const attiva = a.attiva !== false
+      const checks = new Map(s.checksUtente.map(c => [c.data, c]))
+      for (const c of a.checks) checks.set(c.data, { ...checks.get(c.data), ...c })
+      return { ...s, documentiPdf: a.documento ? [...s.documentiPdf.filter(d => d.id !== a.documento!.id), a.documento] : s.documentiPdf, programmiUtente: [...s.programmiUtente, ...a.programmi.map(p => ({ ...p, soloArchivio: !attiva }))],
+        canoniciUtente: [...s.canoniciUtente, ...a.canonici],
+        checksUtente: [...checks.values()].sort((a, b) => a.data.localeCompare(b.data)),
+        pianiAlimentari: [...s.pianiAlimentari, ...a.piani],
+        pianoAlimentareId: attiva ? a.piani.at(-1)?.id ?? s.pianoAlimentareId : s.pianoAlimentareId,
+        profilo: attiva ? { ...s.profilo, programmaAttivoId: a.programmi.at(-1)?.id ?? s.profilo.programmaAttivoId, dietaLibera: a.piani.length ? false : s.profilo.dietaLibera } : s.profilo,
+      }
+    }
+    case 'nome-esercizio':
+      return { ...s, nomiEsercizi: { ...s.nomiEsercizi, [a.id]: a.testo.trim() }, sessioneCorrente: s.sessioneCorrente ? { ...s.sessioneCorrente, esercizi: s.sessioneCorrente.esercizi.map(e => e.esercizioId === a.id ? { ...e, nome: a.testo.trim() } : e) } : null }
+    case 'nota-esercizio':
+      return { ...s, noteEsercizi: { ...s.noteEsercizi, [a.id]: a.testo } }
+    case 'nota-workout':
+      return { ...s, noteWorkout: { ...s.noteWorkout, [a.id]: a.testo } }
     case 'note-checkin':
       return { ...s, noteCheckIn: a.testo }
     case 'importa':
@@ -163,10 +199,10 @@ function riduci(s: Stato, a: Azione): Stato {
 }
 
 // migrazione v1 → v2 (serie: backOff → tipo)
-function migra(raw: any): Stato {
+export function migra(raw: any): Stato {
   const s = { ...VUOTO, ...raw }
   s.versione = 2
-  s.profilo = { ...PROFILO_DEFAULT, ...(raw.profilo ?? {}) }
+  s.profilo = { ...PROFILO_DEFAULT, inizializzato: true, ...(raw.profilo ?? {}) }
   const fix = (sess: any) => ({
     ...sess,
     esercizi: (sess.esercizi ?? []).map((e: any) => ({
@@ -180,6 +216,13 @@ function migra(raw: any): Stato {
   })
   s.sessioni = (s.sessioni ?? []).map(fix)
   s.sessioneCorrente = s.sessioneCorrente ? fix(s.sessioneCorrente) : null
+  if (s.sessioneCorrente && !s.sessioneCorrente.programmaSnapshot) {
+    const p = [...s.programmiUtente, ...SCHEDE_SEED, PROGRAMMA].find(p => p.id === s.sessioneCorrente.programmaId)
+    if (p) {
+      s.sessioneCorrente.programmaSnapshot = p
+      s.sessioneCorrente.settimana = Math.max(1, Math.min(p.durataSettimane, Math.floor(giorniTra(p.dataInizio, s.sessioneCorrente.data) / 7) + 1))
+    }
+  }
   return s as Stato
 }
 
@@ -207,8 +250,9 @@ export function useStore() {
   return v
 }
 
-export function esportaBackup(stato: Stato) {
-  const blob = new Blob([JSON.stringify(stato, null, 2)], { type: 'application/json' })
+export async function esportaBackup(stato: Stato) {
+  const pdfOriginali = await pdfPerBackup(stato)
+  const blob = new Blob([JSON.stringify({ ...stato, pdfOriginali }, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url

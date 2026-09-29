@@ -39,8 +39,8 @@ export function Stepper({ value, step, min = 0, onChange, format, suffix }: {
   useEffect(() => { if (editing) inputRef.current?.select() }, [editing])
 
   function conferma() {
-    const v = parseFloat(testo.replace(',', '.'))
-    if (!isNaN(v) && v >= min) onChange(v)
+    const v = Number(testo.replace(',', '.'))
+    if (testo.trim() && Number.isFinite(v) && v >= min) onChange(v)
     setEditing(false)
   }
 

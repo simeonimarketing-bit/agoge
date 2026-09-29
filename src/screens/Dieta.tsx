@@ -91,7 +91,7 @@ function LiberaSheet({ onClose, data }: { onClose: () => void; data: string }) {
   )
 }
 
-export default function Dieta() {
+function DietaSeed() {
   const { stato, invia } = useStore()
   const oggi = oggiISO()
   const g = stato.dieta[oggi] ?? {
@@ -336,4 +336,33 @@ export default function Dieta() {
       {liberaAperta && <LiberaSheet data={oggi} onClose={() => setLiberaAperta(false)} />}
     </div>
   )
+}
+
+function DietaImportata() {
+  const { stato, invia } = useStore()
+  const piano = stato.pianiAlimentari.find(p => p.id === stato.pianoAlimentareId)!
+  const oggi = oggiISO()
+  const giorno = stato.dieta[oggi]
+  const [pasto, setPasto] = useState<Pasto | null>(null)
+  const [libera, setLibera] = useState(false)
+  const opzioni = piano.pasti.flatMap(p => { const o = p.opzioni.find(o => o.n === giorno?.pasti[p.id]); return o ? [o] : [] })
+  const macro = somma(...opzioni.flatMap(o => o.macro ? [o.macro] : []), ...(giorno?.libere ?? []).map(v => v.macro))
+  const incompleto = opzioni.some(o => !o.macro)
+  return <div className="screen stack" style={{ gap: 16 }}>
+    <header><span className="kicker">Il tuo piano alimentare</span><h1 className="display" style={{ fontSize: '2.4rem' }}>A tavola<span style={{ color: 'var(--fire)' }}>.</span></h1><p className="small fade-dim">{piano.nome} · {opzioni.length}/{piano.pasti.length} pasti scelti</p></header>
+    {piano.note && <details className="card"><summary>Indicazioni del coach</summary><p className="small" style={{ whiteSpace: 'pre-wrap' }}>{piano.note}</p></details>}
+    <div className="card"><span className="kicker">{incompleto ? 'Macro disponibili · totale parziale' : 'Macro registrati oggi'}</span><MacroRow macro={arrotonda(macro)} />{incompleto && <p className="tiny fade-dim">Alcune opzioni non riportano i macro nel PDF: non vengono stimati.</p>}</div>
+    {piano.pasti.map(p => {
+      const o = p.opzioni.find(o => o.n === giorno?.pasti[p.id])
+      return <button key={p.id} className={`card ${o ? 'card--fatta' : ''}`} style={{ textAlign: 'left' }} onClick={() => setPasto(p)}><b>{o ? '✓ ' : ''}{p.nome}</b><p className="small fade-dim">{o ? o.titolo || `Opzione ${o.n}` : `${p.opzioni.length} opzioni · scegli`}</p>{o && <p className="small">{o.voci.join(' · ')}</p>}</button>
+    })}
+    <section className="card stack"><div className="row row--between"><b>Alimenti aggiunti</b><button className="pill" onClick={() => setLibera(true)}>+ aggiungi</button></div>{giorno?.libere?.map((v, i) => <div key={i} className="row row--between"><span>{v.alimento} · {v.grammi} g</span><button className="pill" aria-label={`Rimuovi ${v.alimento}`} onClick={() => invia({ t: 'dieta-libera-rimuovi', data: oggi, indice: i })}>×</button></div>)}</section>
+    {pasto && <Sheet onClose={() => setPasto(null)}><div className="stack"><h2>{pasto.nome}</h2>{pasto.nota && <p className="small">{pasto.nota}</p>}{pasto.opzioni.map(o => <button key={o.n} className="card" style={{ textAlign: 'left' }} onClick={() => { invia({ t: 'dieta-pasto', data: oggi, pasto: pasto.id, opzione: giorno?.pasti[pasto.id] === o.n ? undefined : o.n }); setPasto(null) }}><b>{giorno?.pasti[pasto.id] === o.n ? '✓ ' : ''}Opzione {o.n}{o.titolo ? ` · ${o.titolo}` : ''}</b><ul>{o.voci.map((v, i) => <li key={i} className="small">{v}</li>)}</ul>{o.macro ? <MacroRow macro={o.macro} /> : <p className="tiny fade-dim">Macro non riportati nel documento</p>}</button>)}<button className="btn btn--ghost" onClick={() => setPasto(null)}>Chiudi</button></div></Sheet>}
+    {libera && <LiberaSheet data={oggi} onClose={() => setLibera(false)} />}
+  </div>
+}
+
+export default function Dieta() {
+  const { stato } = useStore()
+  return stato.pianiAlimentari.some(p => p.id === stato.pianoAlimentareId) && !stato.profilo.dietaLibera ? <DietaImportata /> : <DietaSeed />
 }
