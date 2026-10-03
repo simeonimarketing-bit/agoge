@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useStore } from '../lib/store'
-import { canonico, fmtCarico, fmtData, fmtBlocco, isEffettiva, tonnellaggioSessione, pianoSerie, TIPI_LABEL } from '../lib/progression'
+import { canonico, idInSlot, fmtCarico, fmtData, fmtBlocco, isEffettiva, tonnellaggioSessione, pianoSerie, TIPI_LABEL } from '../lib/progression'
 
 export default function Workouts() {
   const { stato, invia } = useStore()
@@ -15,7 +15,7 @@ export default function Workouts() {
     </button>)}
   </div>
   const precedente = sessioni.find(x => x.id !== s.id && (x.inizio ?? x.data) < (s.inizio ?? s.data) && x.programmaId === s.programmaId && x.giornoN === s.giornoN)
-  const nonSvolti = s.programmaSnapshot?.giorni.find(g => g.n === s.giornoN)?.prescrizioni.filter(p => !s.esercizi.some(e => e.esercizioId === p.esercizioId && e.serie.length)) ?? []
+  const nonSvolti = s.programmaSnapshot?.giorni.find(g => g.n === s.giornoN)?.prescrizioni.filter(p => !s.esercizi.some(e => (e.esercizioId === p.esercizioId || (s.programmaId && e.esercizioId === idInSlot(stato, s.programmaId, s.giornoN, p.esercizioId))) && e.serie.length)) ?? []
   const durata = s.inizio && s.fine ? Math.max(0, Math.round((Date.parse(s.fine) - Date.parse(s.inizio)) / 60000)) : null
   return <div className="stack">
     <button className="small fade-dim" style={{ textAlign: 'left' }} onClick={() => setId(null)}>‹ Tutti i workout</button>
@@ -50,5 +50,9 @@ export default function Workouts() {
     })}
     {nonSvolti.length > 0 && <details className="card"><summary>Esercizi non registrati ({nonSvolti.length})</summary><ul>{nonSvolti.map(p => <li key={p.ordine}>{canonico(stato, p.esercizioId)?.nome ?? p.nomePdf}</li>)}</ul></details>}
     <section className="card stack exercise-notes"><label htmlFor="workout-note" className="kicker">Cosa ricordare per la prossima seduta</label><textarea id="workout-note" placeholder="Cosa ha funzionato? Cosa vuoi cambiare?" value={stato.noteWorkout[s.id] ?? ''} onChange={e => invia({ t: 'nota-workout', id: s.id, testo: e.target.value })} /><span className="tiny fade-dim">Salvataggio automatico.</span></section>
+    <button className="btn btn--ghost" style={{ color: 'var(--fire)' }} onClick={() => {
+      if (!confirm(`Eliminare l’allenamento del ${fmtData(s.data)} · ${s.giornoNome}? Serie, carichi e note di questa seduta spariscono dallo storico e non si recuperano.`)) return
+      invia({ t: 'elimina-sessione', id: s.id }); setId(null)
+    }}>Elimina questo allenamento</button>
   </div>
 }

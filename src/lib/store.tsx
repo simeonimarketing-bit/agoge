@@ -26,6 +26,7 @@ export const VUOTO: Stato = {
   checksUtente: [], pianiAlimentari: [],
   nomiEsercizi: {}, noteEsercizi: {}, noteWorkout: {},
   noteCheckIn: '',
+  variantiSlot: {}, superserie: {}, timer: null,
 }
 
 // ————— Date: sempre in ora LOCALE, mai toISOString() —————
@@ -81,6 +82,13 @@ type Azione =
   | { t: 'nota-workout'; id: string; testo: string }
   | { t: 'note-checkin'; testo: string }
   | { t: 'importa'; stato: Stato }
+  | { t: 'nome-esercizio-slot'; chiave: string; programmaId: string; giornoN: number; base: string; attuale: string; testo: string; nuovoId?: string; attrezzo: EsercizioCanonico['attrezzo'] }
+  | { t: 'superserie'; chiave: string; attiva: boolean }
+  | { t: 'elimina-sessione'; id: string }
+  | { t: 'timer-avvia'; durata: number | null; ora: number }
+  | { t: 'timer-aggiungi'; secondi: number }
+  | { t: 'timer-pausa'; ora: number }
+  | { t: 'timer-stop' }
 
 export function riduci(s: Stato, a: Azione): Stato {
   switch (a.t) {
@@ -94,7 +102,7 @@ export function riduci(s: Stato, a: Azione): Stato {
         },
       }
     case 'annulla-sessione':
-      return { ...s, sessioneCorrente: null }
+      return { ...s, sessioneCorrente: null, timer: null }
     case 'logga-esercizio': {
       if (!s.sessioneCorrente) return s
       const rest = s.sessioneCorrente.esercizi.filter(e => e.esercizioId !== a.log.esercizioId)
@@ -121,9 +129,9 @@ export function riduci(s: Stato, a: Azione): Stato {
     }
     case 'chiudi-sessione': {
       const c = s.sessioneCorrente
-      if (!c || c.esercizi.length === 0) return { ...s, sessioneCorrente: null }
+      if (!c || c.esercizi.length === 0) return { ...s, sessioneCorrente: null, timer: null }
       const chiusa: Sessione = { ...c, fine: new Date().toISOString() }
-      return { ...s, sessioneCorrente: null, sessioni: [...s.sessioni, chiusa] }
+      return { ...s, sessioneCorrente: null, sessioni: [...s.sessioni, chiusa], timer: null }
     }
     case 'dieta': {
       const g = s.dieta[a.data] ?? DIETA_GIORNO_VUOTA
@@ -195,6 +203,46 @@ export function riduci(s: Stato, a: Azione): Stato {
       return { ...s, noteCheckIn: a.testo }
     case 'importa':
       return migra(a.stato)
+    case 'nome-esercizio-slot': {
+      const testo = a.testo.trim()
+      if (!testo) return s
+      const rinomina = (id: string, st: Stato): Stato => ({ ...st, nomiEsercizi: { ...st.nomiEsercizi, [id]: testo },
+        sessioneCorrente: st.sessioneCorrente ? { ...st.sessioneCorrente, esercizi: st.sessioneCorrente.esercizi.map(e => e.esercizioId === id ? { ...e, nome: testo } : e) } : null })
+      // Esercizio presente in un solo giorno, o già separato: basta il nome
+      if (!a.nuovoId) return rinomina(a.attuale, s)
+      // Presente anche in altri giorni: questo giorno diventa un esercizio a sé
+      // e si porta dietro lo storico registrato in questo stesso giorno della scheda
+      const id = a.nuovoId
+      const delGiorno = (x: Sessione) => x.programmaId === a.programmaId && x.giornoN === a.giornoN
+      const sposta = (x: Sessione): Sessione => delGiorno(x) ? { ...x, esercizi: x.esercizi.map(e => e.esercizioId === a.base ? { ...e, esercizioId: id } : e), rimandati: x.rimandati?.map(r => r === a.base ? id : r) } : x
+      const separato: Stato = { ...s,
+        canoniciUtente: [...s.canoniciUtente, { id, nome: testo, alias: [testo], attrezzo: a.attrezzo, custom: true }],
+        variantiSlot: { ...s.variantiSlot, [a.chiave]: id },
+        incrementi: a.base in s.incrementi ? { ...s.incrementi, [id]: s.incrementi[a.base] } : s.incrementi,
+        sessioni: s.sessioni.map(sposta),
+        sessioneCorrente: s.sessioneCorrente ? sposta(s.sessioneCorrente) : null,
+      }
+      return rinomina(id, separato)
+    }
+    case 'superserie': {
+      const superserie = { ...s.superserie }
+      if (a.attiva) superserie[a.chiave] = true
+      else delete superserie[a.chiave]
+      return { ...s, superserie }
+    }
+    case 'elimina-sessione': {
+      const { [a.id]: _, ...noteWorkout } = s.noteWorkout
+      return { ...s, sessioni: s.sessioni.filter(x => x.id !== a.id), noteWorkout }
+    }
+    case 'timer-avvia':
+      return { ...s, timer: { inizio: a.ora, durata: a.durata } }
+    case 'timer-aggiungi':
+      return s.timer && s.timer.durata !== null ? { ...s, timer: { ...s.timer, durata: s.timer.durata + a.secondi } } : s
+    case 'timer-pausa':
+      if (!s.timer) return s
+      return { ...s, timer: s.timer.pausaDa ? { ...s.timer, inizio: s.timer.inizio + (a.ora - s.timer.pausaDa), pausaDa: undefined } : { ...s.timer, pausaDa: a.ora } }
+    case 'timer-stop':
+      return { ...s, timer: null }
   }
 }
 

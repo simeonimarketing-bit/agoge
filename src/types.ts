@@ -205,4 +205,17 @@ export interface Stato {
   noteEsercizi: Record<string, string>
   noteWorkout: Record<string, string>
   noteCheckIn: string // note e fastidi per il prossimo check-in
+  // esercizio rinominato in un solo giorno: "programma|giorno|esercizio base" -> id della variante
+  variantiSlot: Record<string, string>
+  // "programma|giorno|esercizio" -> collegato in superserie con l'esercizio successivo del giorno
+  superserie: Record<string, true>
+  timer: TimerRecupero | null
+}
+
+// Il recupero si misura sull'orologio, non contando i secondi: iOS sospende
+// l'app in background e un contatore si fermerebbe.
+export interface TimerRecupero {
+  inizio: number // epoch ms (spostato in avanti delle pause)
+  durata: number | null // secondi; null = "quando ti senti pronto", conta in avanti
+  pausaDa?: number // epoch ms dell'inizio della pausa
 }

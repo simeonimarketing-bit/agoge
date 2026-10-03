@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { fraseDelGiorno, type ContestoFrase } from '../data/frasi'
 import { scomponi, BILANCIERE_KG } from '../lib/plates'
-import { fmtCarico } from '../lib/progression'
+import { fmtCarico, tempoTimer } from '../lib/progression'
+import { useStore } from '../lib/store'
 import type { Macro } from '../types'
 
 // ————— Numero grande con unità piccola —————
@@ -108,33 +109,30 @@ export function TecnicaSelect({ value, onChange }: {
 }
 
 // ————— Barra rest persistente (non blocca la schermata) —————
-export function RestBar({ secondi, onFine }: { secondi: number | null; onFine: () => void }) {
-  const countdown = secondi !== null
-  const [rimasti, setRimasti] = useState(secondi ?? 0)
-  const [trascorsi, setTrascorsi] = useState(0)
-  const [pausa, setPausa] = useState(false)
-  const [extra, setExtra] = useState(0)
-
+// Legge l'orario di inizio salvato nello stato: se esci dall'app, o iOS la chiude,
+// al rientro il tempo è quello vero.
+export function RestBar() {
+  const { stato, invia } = useStore()
+  const t = stato.timer
+  const [ora, setOra] = useState(() => Date.now())
   useEffect(() => {
-    if (pausa) return
-    const id = setInterval(() => {
-      if (countdown) setRimasti(r => r - 1)
-      else setTrascorsi(t => t + 1)
-    }, 1000)
-    return () => clearInterval(id)
-  }, [countdown, pausa])
-
-  const mostra = countdown ? Math.max(rimasti + extra, 0) : trascorsi
-  const finito = countdown && rimasti + extra <= 0
-
+    if (!t) return
+    const aggiorna = () => setOra(Date.now())
+    const id = setInterval(aggiorna, 250)
+    document.addEventListener('visibilitychange', aggiorna)
+    window.addEventListener('focus', aggiorna)
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', aggiorna); window.removeEventListener('focus', aggiorna) }
+  }, [t])
+  const { secondi: mostra, finito } = t ? tempoTimer(t, ora) : { secondi: 0, finito: false }
   useEffect(() => {
     if (finito && 'vibrate' in navigator) navigator.vibrate([200, 100, 200])
   }, [finito])
-
+  if (!t) return null
+  const countdown = t.durata !== null
+  const pausa = !!t.pausaDa
   const mm = Math.floor(mostra / 60)
   const ss = String(mostra % 60).padStart(2, '0')
-  const tot = countdown ? (secondi ?? 0) + extra : 1
-  const perc = countdown ? Math.max(0, Math.min(1, mostra / Math.max(tot, 1))) : 1
+  const perc = countdown ? Math.max(0, Math.min(1, mostra / Math.max(t.durata ?? 1, 1))) : 1
 
   return (
     <div className={`restbar ${finito ? 'restbar--fine' : ''}`} role="timer">
@@ -143,18 +141,18 @@ export function RestBar({ secondi, onFine }: { secondi: number | null; onFine: (
         <div>
           <span className="restbar-t">{mm}:{ss}</span>
           <span className="tiny fade-dim" style={{ marginLeft: 8 }}>
-            {finito ? 'sotto il ferro' : countdown ? 'rest' : 'quando ti senti pronto'}
+            {finito ? 'sotto il ferro' : pausa ? 'in pausa' : countdown ? 'rest' : 'quando ti senti pronto'}
           </span>
         </div>
         <div className="row" style={{ gap: 6 }}>
           {countdown && !finito && (
             <>
-              <button className="restbar-btn" onClick={() => setExtra(e => e + 15)}>+15</button>
-              <button className="restbar-btn" onClick={() => setExtra(e => e + 30)}>+30</button>
-              <button className="restbar-btn" onClick={() => setPausa(p => !p)}>{pausa ? '▶' : 'II'}</button>
+              <button className="restbar-btn" onClick={() => invia({ t: 'timer-aggiungi', secondi: 15 })}>+15</button>
+              <button className="restbar-btn" onClick={() => invia({ t: 'timer-aggiungi', secondi: 30 })}>+30</button>
+              <button className="restbar-btn" aria-label={pausa ? 'riprendi' : 'pausa'} onClick={() => invia({ t: 'timer-pausa', ora: Date.now() })}>{pausa ? '▶' : 'II'}</button>
             </>
           )}
-          <button className="restbar-btn restbar-btn--fire" onClick={onFine}>{finito ? 'Vai' : 'Termina'}</button>
+          <button className="restbar-btn restbar-btn--fire" onClick={() => invia({ t: 'timer-stop' })}>{finito ? 'Vai' : 'Termina'}</button>
         </div>
       </div>
     </div>

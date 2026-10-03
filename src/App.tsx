@@ -5,6 +5,7 @@ import Storico from './screens/Storico'
 import Dieta from './screens/Dieta'
 import Check from './screens/Check'
 import Altro from './screens/Altro'
+import { RestBar } from './components/comuni'
 
 type Tab = 'oggi' | 'storico' | 'dieta' | 'check' | 'altro'
 
@@ -80,6 +81,7 @@ function Contenuto() {
       {tab === 'dieta' && <Dieta />}
       {tab === 'check' && <Check />}
       {tab === 'altro' && <Altro />}
+      <RestBar />
       <nav className="tabbar" aria-label="navigazione">
         {TABS.map(t => (
           <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => setTab(t.id)}>

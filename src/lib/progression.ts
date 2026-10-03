@@ -1,4 +1,4 @@
-import type { Blocco, Prescrizione, Sessione, LogSerie, Stato, Programma, TipoSerie } from '../types'
+import type { Blocco, Prescrizione, Sessione, LogSerie, Stato, Programma, TipoSerie, TimerRecupero } from '../types'
 import { TIPI_ALLENANTI } from '../types'
 import { PROGRAMMA } from '../data/programma'
 import { canonicoById, CANONICI } from '../data/canonici'
@@ -41,6 +41,20 @@ const PROGRAMMA_VUOTO: Programma = {
 
 export function tuttiICanonici(stato: Stato) {
   return [...CANONICI, ...stato.canoniciUtente].map(c => ({ ...c, alias: [...new Set([c.nome, ...c.alias])], nome: stato.nomiEsercizi[c.id] || c.nome }))
+}
+
+// Un esercizio vive in un giorno preciso della scheda: la chest press del giorno 2
+// e quella del giorno 5 possono essere macchine diverse, con nome e storico propri.
+export const chiaveSlot = (programmaId: string, giornoN: number, esercizioId: string) => `${programmaId}|${giornoN}|${esercizioId}`
+export const idInSlot = (stato: Stato, programmaId: string, giornoN: number, esercizioId: string) =>
+  stato.variantiSlot[chiaveSlot(programmaId, giornoN, esercizioId)] ?? esercizioId
+
+// Secondi del recupero calcolati dall'orologio: restano giusti dopo che l'app torna in primo piano
+export function tempoTimer(t: TimerRecupero, ora: number): { secondi: number; finito: boolean } {
+  const trascorsi = Math.max(0, Math.floor(((t.pausaDa ?? ora) - t.inizio) / 1000))
+  if (t.durata === null) return { secondi: trascorsi, finito: false }
+  const rimasti = t.durata - trascorsi
+  return { secondi: Math.max(rimasti, 0), finito: rimasti <= 0 }
 }
 
 export function canonico(stato: Stato, id: string) {

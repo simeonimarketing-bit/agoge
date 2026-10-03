@@ -7,9 +7,9 @@ import {
   settimanaCorrente, blocchiSettimana, targetBlocco, ultimaVolta, record, recordReps,
   incrementoDefault, tonnellaggioSessione, serieAllenantiSessione, serieEffettiveSessione, fmtKg, fmtData, fmtBlocco,
   programmaAttivo, canonico, isAllenante, isEffettiva, rirMedio, PASSO_CARICO, arrotondaCarico, fmtCarico,
-  TIPI_SIGLA, TIPI_LABEL, pianoSerie, serieEffettivePianificate, ultimaNota, SCARICO,
+  TIPI_SIGLA, TIPI_LABEL, pianoSerie, serieEffettivePianificate, ultimaNota, SCARICO, chiaveSlot, idInSlot,
 } from '../lib/progression'
-import { BigNum, Quote, RestBar, PlateCalc, Sheet, Stepper, RirSelect, TecnicaSelect, Progress, useWakeLock } from '../components/comuni'
+import { BigNum, Quote, PlateCalc, Sheet, Stepper, RirSelect, TecnicaSelect, Progress, useWakeLock } from '../components/comuni'
 import { fraseDelGiorno } from '../data/frasi'
 import type { LogSerie, Prescrizione, TipoSerie, Tecnica } from '../types'
 import heroImg from '../assets/img/chalk.jpg'
@@ -17,12 +17,20 @@ import arnoldImg from '../assets/img/arnold.jpg'
 
 const TIPI_ORDINE: TipoSerie[] = ['riscaldamento', 'preparatoria', 'working', 'top', 'backoff', 'drop', 'restpause', 'parziale']
 
+// la prescrizione col suo esercizio di questo giorno (eventuale variante rinominata) e quello della scheda
+type PrescrizioneGiorno = Prescrizione & { base: string }
+
 // ————— Sheet di logging —————
-function LogSheet({ p, settimana, avvicinamento, onClose, onRest }: {
-  p: Prescrizione; settimana: number
+function LogSheet({ p, settimana, avvicinamento, onClose, onSerieEffettiva, onRinomina, altriGiorni, superserie, successivo, onCollega }: {
+  p: PrescrizioneGiorno; settimana: number
   avvicinamento: boolean // il coach chiede 2-3 serie di avvicinamento prima di ogni esercizio
   onClose: () => void
-  onRest: (secondi: number | null) => void
+  onSerieEffettiva: (fatte: number) => void
+  onRinomina: (testo: string) => void
+  altriGiorni: number[] // altri giorni della scheda in cui compare lo stesso esercizio
+  superserie: string | null // nomi degli esercizi collegati
+  successivo: { nome: string; collegato: boolean } | null // esercizio dopo nella scheda
+  onCollega: (attiva: boolean) => void
 }) {
   const { stato, invia } = useStore()
   const can = canonico(stato, p.esercizioId)!
@@ -66,7 +74,7 @@ function LogSheet({ p, settimana, avvicinamento, onClose, onRest }: {
     persisti(agg)
     // le serie di avvicinamento non fanno partire il rest e non toccano il piano
     if (!isEffettiva(s)) return
-    onRest(p.rest ?? null)
+    onSerieEffettiva(agg.filter(isEffettiva).length)
     // prepara la prossima riga del piano: back off e drop scalano il carico
     const prossima = piano[Math.min(agg.filter(isEffettiva).length, piano.length - 1)]
     const prossimoTipo = prossima?.tipo ?? s.tipo
@@ -106,12 +114,13 @@ function LogSheet({ p, settimana, avvicinamento, onClose, onRest }: {
           <div className="kicker">{blocchi.map(fmtBlocco).join(' + ')}{p.rest ? ` · rest ${p.rest}"` : ''}</div>
           <h2 style={{ fontSize: '1.35rem', fontWeight: 800, marginTop: 2, lineHeight: 1.15 }}>{can.nome}</h2>
           <button className="small fade-dim" onClick={() => setModificaNome(v => !v)}>✎ Personalizza nome</button>
-          {modificaNome && <form className="stack" onSubmit={e => { e.preventDefault(); if (!nome.trim()) return; invia({ t: 'nome-esercizio', id: p.esercizioId, testo: nome }); setModificaNome(false) }}>
+          {modificaNome && <form className="stack" onSubmit={e => { e.preventDefault(); if (!nome.trim()) return; onRinomina(nome); setModificaNome(false) }}>
             <label className="small">Nome del macchinario<input aria-label="Nome personalizzato" maxLength={120} value={nome} onChange={e => setNome(e.target.value)} /></label>
-            <span className="tiny fade-dim">Nel PDF: {p.nomePdf}. Lo storico resta collegato a questo esercizio.</span>
+            <span className="tiny fade-dim">Nel PDF: {p.nomePdf}. Il nome vale solo per questo giorno della scheda e lo ritrovi le settimane successive.{altriGiorni.length > 0 && p.esercizioId === p.base ? ` Lo stesso esercizio nel giorno ${altriGiorni.join(', ')} resta com’è, con il suo storico.` : ''}</span>
             <button className="btn" disabled={!nome.trim()}>Salva nome</button>
           </form>}
           {p.note && <div className="small fade-dim">{p.note}</div>}
+          {superserie && <div className="small" style={{ color: 'var(--fire)', marginTop: 4 }}>⇄ Superserie: {superserie}. Dopo ogni serie passi all’esercizio collegato, il recupero parte alla fine del giro.</div>}
         </div>
 
         {ultima && (
@@ -215,6 +224,11 @@ function LogSheet({ p, settimana, avvicinamento, onClose, onRest }: {
             </button>
           )}
         </div>
+        {successivo && (
+          <button className="small" style={{ textAlign: 'left', color: successivo.collegato ? 'var(--fire)' : 'var(--dim)' }} onClick={() => onCollega(!successivo.collegato)}>
+            {successivo.collegato ? `⇄ In superserie con ${successivo.nome} · scollega` : `⇄ Fai in superserie con ${successivo.nome}`}
+          </button>
+        )}
         <section className="card stack exercise-notes">
           <label htmlFor="exercise-note" className="kicker">Le tue note · per la prossima volta</label>
           <textarea id="exercise-note" rows={4} placeholder="Sedile, presa, sensazioni e cosa ricordare…" value={note} onChange={e => salvaNote(e.target.value)} />
@@ -310,13 +324,17 @@ export default function Oggi() {
   const [giornoSel, setGiornoSel] = useState(stato.sessioneCorrente?.giornoN ?? suggerito)
   const [aperto, setAperto] = useState<string | null>(null)
   const [resoconto, setResoconto] = useState(false)
-  const [rest, setRest] = useState<{ secondi: number | null; k: number } | null>(null)
 
   useEffect(() => {
     if (!programma.giorni.some(g => g.n === giornoSel)) setGiornoSel(suggerito)
   }, [programma.id, giornoSel, suggerito])
 
-  const giorno = programma.giorni.find(g => g.n === giornoSel) ?? programma.giorni[0]
+  const giornoScheda = programma.giorni.find(g => g.n === giornoSel) ?? programma.giorni[0]
+  // ogni esercizio con l'identità che ha in questo giorno (rinominato qui = esercizio a sé)
+  const giorno = useMemo(() => giornoScheda && {
+    ...giornoScheda,
+    prescrizioni: giornoScheda.prescrizioni.map((p): PrescrizioneGiorno => ({ ...p, base: p.esercizioId, esercizioId: idInSlot(stato, programma.id, giornoScheda.n, p.esercizioId) })),
+  }, [giornoScheda, programma.id, stato.variantiSlot])
   const sc = stato.sessioneCorrente
   const inSessione = sc !== null && sc.giornoN === giornoSel
   // c'è una sessione aperta su un altro giorno: non si sovrascrive mai in silenzio
@@ -346,6 +364,44 @@ export default function Oggi() {
   const mostraCheck = !stato.profilo.ospite && !stato.checksUtente.length
   const giorniAlCheck = giorniTra(oggi, PROSSIMO_CHECK.data)
   const chiedeAvvicinamento = programma.avvicinamento ?? !programma.custom
+
+  // ————— Superserie: un esercizio è collegato al successivo nell'ordine della scheda —————
+  const ordineScheda = giorno ? [...giorno.prescrizioni].sort((a, b) => a.ordine - b.ordine) : []
+  const collegatoAlSuccessivo = (p: PrescrizioneGiorno) => !!giorno && !!stato.superserie[chiaveSlot(programma.id, giorno.n, p.base)]
+  const gruppo = (p: PrescrizioneGiorno): PrescrizioneGiorno[] => {
+    let i = ordineScheda.findIndex(x => x.esercizioId === p.esercizioId)
+    while (i > 0 && collegatoAlSuccessivo(ordineScheda[i - 1])) i--
+    const out = [ordineScheda[i]]
+    while (i < ordineScheda.length - 1 && collegatoAlSuccessivo(ordineScheda[i])) out.push(ordineScheda[++i])
+    return out
+  }
+  const effettiveFatte = (id: string) => sc?.esercizi.find(e => e.esercizioId === id)?.serie.filter(isEffettiva).length ?? 0
+  const restanti = (p: PrescrizioneGiorno, fatteOra?: number) => serieEffettivePianificate(blocchiSettimana(p, sett.n)) - (fatteOra ?? effettiveFatte(p.esercizioId))
+
+  // dopo una serie effettiva: nel giro di superserie si passa al prossimo esercizio senza recupero,
+  // a fine giro parte il recupero e si torna al primo che ha ancora serie
+  function dopoSerie(p: PrescrizioneGiorno, fatte: number) {
+    const g = gruppo(p)
+    const rimasti = (x: PrescrizioneGiorno) => x.esercizioId === p.esercizioId ? restanti(x, fatte) : restanti(x)
+    if (g.length > 1) {
+      const dopo = g.slice(g.indexOf(p) + 1).find(x => rimasti(x) > 0)
+      if (dopo) { invia({ t: 'timer-stop' }); setAperto(dopo.esercizioId); return }
+      const rest = [...g].reverse().find(x => x.rest)?.rest ?? null
+      invia({ t: 'timer-avvia', durata: rest, ora: Date.now() })
+      const primo = g.find(x => rimasti(x) > 0)
+      if (primo) setAperto(primo.esercizioId)
+      return
+    }
+    invia({ t: 'timer-avvia', durata: p.rest ?? null, ora: Date.now() })
+  }
+
+  function rinomina(p: PrescrizioneGiorno, testo: string) {
+    const condiviso = programma.giorni.flatMap(g => g.prescrizioni).filter(x => x.esercizioId === p.base).length > 1
+    const separa = condiviso && p.esercizioId === p.base
+    const nuovoId = separa ? 'var-' + crypto.randomUUID() : undefined
+    invia({ t: 'nome-esercizio-slot', chiave: chiaveSlot(programma.id, giorno!.n, p.base), programmaId: programma.id, giornoN: giorno!.n, base: p.base, attuale: p.esercizioId, testo, nuovoId, attrezzo: canonico(stato, p.base)?.attrezzo ?? 'macchina' })
+    if (nuovoId) setAperto(nuovoId)
+  }
 
   if (!giorno) {
     return (
@@ -414,7 +470,7 @@ export default function Oggi() {
               </div>
             )}
           </div>
-          <button className="btn btn--fire" disabled={fatti.size === 0} onClick={() => { setRest(null); setResoconto(true) }}>
+          <button className="btn btn--fire" disabled={fatti.size === 0} onClick={() => { invia({ t: 'timer-stop' }); setResoconto(true) }}>
             Chiudi sessione ({fatti.size}/{giorno.prescrizioni.length})
           </button>
         </>
@@ -499,6 +555,10 @@ export default function Oggi() {
                   <span className="display" style={{ color: isAttivo ? 'var(--fire)' : 'var(--dim)', fontSize: '1.4rem', paddingLeft: 6 }}>›</span>
                 </div>
               </button>
+              {collegatoAlSuccessivo(p) && (() => {
+                const successivo = ordineScheda[ordineScheda.findIndex(x => x.esercizioId === p.esercizioId) + 1]
+                return successivo && <div className="tiny" style={{ marginTop: 8, paddingLeft: 8, color: 'var(--fire)' }}>⇄ In superserie con {canonico(stato, successivo.esercizioId)?.nome}</div>
+              })()}
               {inSessione && !fatto && (
                 <div className="row" style={{ marginTop: 8, paddingLeft: 8, gap: 8, flexWrap: 'wrap' }}>
                   {inAttesa
@@ -518,16 +578,26 @@ export default function Oggi() {
         })}
       </div>
 
-      {aperto && giorno.prescrizioni.some(p => p.esercizioId === aperto) && (
-        <LogSheet
-          p={giorno.prescrizioni.find(p => p.esercizioId === aperto)!}
+      {aperto && giorno.prescrizioni.some(p => p.esercizioId === aperto) && (() => {
+        const p = giorno.prescrizioni.find(p => p.esercizioId === aperto)!
+        const g = gruppo(p)
+        return <LogSheet
+          key={aperto}
+          p={p}
           settimana={sett.n}
           avvicinamento={chiedeAvvicinamento}
           onClose={() => setAperto(null)}
-          onRest={s => setRest({ secondi: s, k: Date.now() })}
+          onSerieEffettiva={fatte => dopoSerie(p, fatte)}
+          onRinomina={testo => rinomina(p, testo)}
+          altriGiorni={programma.giorni.filter(x => x.n !== giorno.n && x.prescrizioni.some(y => y.esercizioId === p.base)).map(x => x.n)}
+          superserie={g.length > 1 ? g.map(x => canonico(stato, x.esercizioId)?.nome).join(' + ') : null}
+          successivo={(() => {
+            const dopo = ordineScheda[ordineScheda.findIndex(x => x.esercizioId === p.esercizioId) + 1]
+            return dopo ? { nome: canonico(stato, dopo.esercizioId)?.nome ?? dopo.nomePdf, collegato: collegatoAlSuccessivo(p) } : null
+          })()}
+          onCollega={attiva => invia({ t: 'superserie', chiave: chiaveSlot(programma.id, giorno.n, p.base), attiva })}
         />
-      )}
-      {rest && <RestBar key={rest.k} secondi={rest.secondi} onFine={() => setRest(null)} />}
+      })()}
       {resoconto && <Resoconto onChiudi={() => setResoconto(false)} />}
     </div>
   )
