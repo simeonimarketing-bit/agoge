@@ -13,7 +13,12 @@ Gli utenti già presenti conservano profilo e storico automaticamente.
   previsto/fatto, RIR, tecnica, note dell’esercizio e conclusioni personali.
   Le nuove registrazioni conservano la prescrizione effettiva della seduta;
   quelle precedenti mostrano “non registrata”, senza ricostruzioni arbitrarie.
-- **Tavola**: pasti e opzioni del PDF, quantità, macro se riportati e alimenti liberi.
+- **Tavola**: una sola schermata per il piano precaricato e per quelli importati.
+  I PDF di Antonio non hanno macro: per i piani importati si stimano in automatico
+  dalle grammature (`src/lib/stima-macro.ts`), contando la prima alternativa e
+  dichiarando le convenzioni (pezzi, verdure senza peso). Le righe non riconosciute
+  sono mostrate ed escluse dal totale. Integratori e regola degli sgarri arrivano dal
+  PDF; frequenze e norme standard compaiono solo per i piani letti dai PDF di Antonio.
   Ogni piano importato ha identificatori distinti: le selezioni precedenti non
   vengono associate per errore alle nuove opzioni. Il piano si seleziona in Sala.
 - **Check**: pesate quotidiane, media a 7 giorni, misure importate, grafici e tabella.

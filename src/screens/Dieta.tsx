@@ -1,16 +1,84 @@
 import { useMemo, useState } from 'react'
 import { PASTI, FREQUENZE, INTEGRAZIONE, REGOLE_DIETA, DIETA_NOME } from '../data/dieta'
-import { MACRO_OPZIONI, MACRO_VUOTO, somma, scala, arrotonda, ALIMENTI } from '../data/macro'
+import { MACRO_OPZIONI, somma, scala, arrotonda, ALIMENTI } from '../data/macro'
+import { stimaVoci, vociBaseFissa, type Stima } from '../lib/stima-macro'
 import { useStore, oggiISO, lunediDi, giorniTra } from '../lib/store'
 import { Quote, Sheet, MacroRow } from '../components/comuni'
-import type { Pasto, Macro, VoceLibera, Alimento } from '../types'
+import type { Pasto, Macro, VoceLibera, Alimento, Stato } from '../types'
 
-const macroOpzione = (pastoId: string, n: number): Macro =>
-  MACRO_OPZIONI[`${pastoId}-${n}`]?.macro ?? MACRO_VUOTO
+// ————— La Tavola è una sola: cambia solo da dove arrivano pasti, macro e regole —————
+// Piano di Salvatore: data/dieta.ts + macro calcolati a mano (data/macro.ts).
+// Piano importato: righe del PDF + stima automatica (lib/stima-macro.ts).
+interface Vista {
+  kicker: string
+  pasti: Pasto[]
+  stima: (pasto: Pasto, n: number) => Stima
+  conBase: (pasto: Pasto) => boolean
+  integrazione: { colazione?: string; cena?: string } | null
+  sgarriOgni: number | null
+  frequenze: boolean
+  regole: string[]
+  indicazioni?: string
+  fonteMacro: string
+}
 
-// la cena = base fissa + secondo scelto
-const macroCena = (n: number): Macro =>
-  arrotonda(somma(MACRO_OPZIONI['cena-base'].macro, macroOpzione('cena', n)))
+const NESSUNA: Stima = { macro: null, assunzioni: [], ignote: [] }
+
+const unisci = (...stime: Stima[]): Stima => {
+  const conMacro = stime.flatMap(s => s.macro ? [s.macro] : [])
+  return {
+    macro: conMacro.length ? arrotonda(somma(...conMacro)) : null,
+    assunzioni: [...new Set(stime.flatMap(s => s.assunzioni))],
+    ignote: stime.flatMap(s => s.ignote),
+  }
+}
+
+const VISTA_SALVATORE: Vista = {
+  kicker: `Piano ${DIETA_NOME} · 4 pasti · l'opzione è l'unità`,
+  pasti: PASTI,
+  stima: (p, n) => {
+    const info = MACRO_OPZIONI[`${p.id}-${n}`]
+    const opz: Stima = info ? { macro: info.macro, assunzioni: info.assunzioni, ignote: [] } : NESSUNA
+    if (p.id !== 'cena') return opz
+    const base = MACRO_OPZIONI['cena-base']
+    return unisci({ macro: base.macro, assunzioni: base.assunzioni, ignote: [] }, opz)
+  },
+  conBase: p => p.id === 'cena',
+  integrazione: INTEGRAZIONE,
+  sgarriOgni: 15,
+  frequenze: true,
+  regole: REGOLE_DIETA,
+  fonteMacro: 'Macro calcolati da tabelle CREA/USDA sulle grammature del coach — nei suoi PDF non ci sono.',
+}
+
+function vistaImportata(piano: Stato['pianiAlimentari'][number]): Vista {
+  const righe = (piano.note ?? '').split('\n').map(r => r.trim()).filter(Boolean)
+  const integratore = (re: RegExp) => righe.find(r => re.test(r))?.replace(/^[^:]*:\s*/, '')
+  const colazione = integratore(/^(dopo\s+)?colazione\s*:/i)
+  const cena = integratore(/^(dopo\s+)?cena\s*:/i)
+  const sgarri = (piano.note ?? '').match(/uno ogni\s+(\d+)\s+giorni/i)
+  // le categorie (pesce, legumi…) le assegna solo il lettore dei PDF di Antonio:
+  // se ci sono, valgono anche le sue frequenze e norme standard
+  const diAntonio = piano.pasti.some(p => p.opzioni.some(o => o.categorie.length))
+  return {
+    kicker: `Piano ${piano.nome} · ${piano.pasti.length} pasti · l'opzione è l'unità`,
+    pasti: piano.pasti,
+    stima: (p, n) => {
+      const o = p.opzioni.find(o => o.n === n)
+      if (!o) return NESSUNA
+      if (o.macro) return { macro: o.macro, assunzioni: [], ignote: [] }
+      const base = vociBaseFissa(p.nota)
+      return base.length ? unisci(stimaVoci(base), stimaVoci(o.voci)) : stimaVoci(o.voci)
+    },
+    conBase: p => vociBaseFissa(p.nota).length > 0,
+    integrazione: colazione || cena ? { colazione, cena } : null,
+    sgarriOgni: sgarri ? Number(sgarri[1]) : null,
+    frequenze: diAntonio,
+    regole: diAntonio ? REGOLE_DIETA : [],
+    indicazioni: piano.note,
+    fonteMacro: 'Macro stimati in automatico da tabelle CREA/USDA sulle grammature del piano — nel PDF non ci sono.',
+  }
+}
 
 // ————— Dieta libera: aggiungi ciò che mangi, senza opzioni —————
 function LiberaSheet({ onClose, data }: { onClose: () => void; data: string }) {
@@ -91,8 +159,9 @@ function LiberaSheet({ onClose, data }: { onClose: () => void; data: string }) {
   )
 }
 
-function DietaSeed() {
+function Tavola({ vista }: { vista: Vista }) {
   const { stato, invia } = useStore()
+  const pasti = vista.pasti
   const oggi = oggiISO()
   const g = stato.dieta[oggi] ?? {
     pasti: {}, acqua: false, acquaAllenamento: false, sgarro: false,
@@ -106,22 +175,26 @@ function DietaSeed() {
     stato.sessioneCorrente?.data === oggi || stato.sessioni.some(s => s.data === oggi)
 
   // ————— Totale giornaliero: opzioni scelte + voci libere —————
-  const { totale, selezionati, mancanti } = useMemo(() => {
+  const { totale, selezionati, mancanti, escluse } = useMemo(() => {
     const parti: Macro[] = []
     let sel = 0
     const manca: string[] = []
+    const ignote: string[] = []
     if (!soloLibera) {
-      for (const p of PASTI) {
+      for (const p of pasti) {
         const n = g.pasti[p.id]
         if (n !== undefined) {
           sel++
-          parti.push(p.id === 'cena' ? macroCena(n) : macroOpzione(p.id, n))
+          const st = vista.stima(p, n)
+          if (st.macro) parti.push(st.macro)
+          else ignote.push(`${p.nome}: opzione ${n}`)
+          ignote.push(...st.ignote)
         } else manca.push(p.nome.toLowerCase())
       }
     }
     for (const v of g.libere ?? []) parti.push(v.macro)
-    return { totale: arrotonda(somma(...parti)), selezionati: sel, mancanti: manca }
-  }, [g, soloLibera])
+    return { totale: arrotonda(somma(...parti)), selezionati: sel, mancanti: manca, escluse: ignote }
+  }, [g, soloLibera, vista, pasti])
 
   const lunedi = lunediDi(oggi)
   const contaCategorie = useMemo(() => {
@@ -129,13 +202,13 @@ function DietaSeed() {
     for (const [data, dg] of Object.entries(stato.dieta)) {
       if (data < lunedi || data > oggi) continue
       for (const [pastoId, opzN] of Object.entries(dg.pasti)) {
-        const pasto = PASTI.find(p => p.id === pastoId)
+        const pasto = pasti.find(p => p.id === pastoId)
         const opz = pasto?.opzioni.find(o => o.n === opzN)
         for (const c of opz?.categorie ?? []) conta[c] = (conta[c] ?? 0) + 1
       }
     }
     return conta
-  }, [stato.dieta, lunedi, oggi])
+  }, [stato.dieta, lunedi, oggi, pasti])
 
   const ultimoSgarro = Object.entries(stato.dieta).filter(([, dg]) => dg.sgarro).map(([d]) => d).sort().pop()
   const giorniDaSgarro = ultimoSgarro ? giorniTra(ultimoSgarro, oggi) : null
@@ -143,7 +216,7 @@ function DietaSeed() {
   return (
     <div className="screen stack" style={{ gap: 16 }}>
       <header>
-        <span className="kicker">{soloLibera ? 'Dieta libera — logghi quello che mangi' : `Piano ${DIETA_NOME} · 4 pasti · l'opzione è l'unità`}</span>
+        <span className="kicker">{soloLibera ? 'Dieta libera — logghi quello che mangi' : vista.kicker}</span>
         <h1 className="display" style={{ fontSize: '2.4rem', lineHeight: 1, marginTop: 6 }}>
           La tavola<span style={{ color: 'var(--fire)' }}>.</span>
         </h1>
@@ -157,28 +230,32 @@ function DietaSeed() {
           <div className="row row--between">
             <span className="tiny kicker">Totale di oggi</span>
             {!soloLibera && (
-              <span className="tiny" style={{ color: selezionati === PASTI.length ? 'var(--fire)' : 'var(--dim)' }}>
-                {selezionati === PASTI.length
-                  ? `${selezionati} pasti su ${PASTI.length} ✓`
+              <span className="tiny" style={{ color: selezionati === pasti.length ? 'var(--fire)' : 'var(--dim)' }}>
+                {selezionati === pasti.length
+                  ? `${selezionati} pasti su ${pasti.length} ✓`
                   : `parziale — manca ${mancanti.join(', ')}`}
               </span>
             )}
           </div>
           <div style={{ marginTop: 8 }}><MacroRow macro={totale} size="grande" /></div>
           <p className="tiny" style={{ color: 'var(--dim)', marginTop: 8 }}>
-            Macro calcolati da tabelle CREA/USDA sulle grammature del coach — nei suoi PDF non ci sono.
-            Le voci con * usano una convenzione dichiarata. Descrizione, non prescrizione.
+            {vista.fonteMacro} Le voci con * usano una convenzione dichiarata. Descrizione, non prescrizione.
           </p>
+          {escluse.length > 0 && (
+            <p className="tiny" style={{ color: 'var(--fire)', marginTop: 6 }}>
+              Non riconosciuti, esclusi dal totale: {escluse.join(' · ')}. Se ti servono, aggiungili da «+ aggiungi».
+            </p>
+          )}
         </div>
       </div>
 
       {/* i 4 pasti a opzioni */}
       {!soloLibera && (
         <div className="stack" style={{ gap: 8 }}>
-          {PASTI.map(p => {
+          {pasti.map(p => {
             const scelta = g.pasti[p.id]
             const opz = p.opzioni.find(o => o.n === scelta)
-            const mac = scelta !== undefined ? (p.id === 'cena' ? macroCena(scelta) : macroOpzione(p.id, scelta)) : null
+            const mac = scelta !== undefined ? vista.stima(p, scelta).macro : null
             return (
               <button key={p.id} className={`card ${scelta ? 'card--fatta' : 'card--knurled'} row row--between`} style={{ textAlign: 'left' }}
                 onClick={() => setPastoAperto(p)}>
@@ -229,23 +306,25 @@ function DietaSeed() {
 
       {!soloLibera && (
         <>
+          {vista.integrazione && <>
           <div className="row" style={{ gap: 8 }}>
-            <button className={`pill ${g.integrazioneColazione ? 'pill--on' : ''}`} style={{ flex: 1 }}
+            {vista.integrazione.colazione && <button className={`pill ${g.integrazioneColazione ? 'pill--on' : ''}`} style={{ flex: 1 }}
               onClick={() => invia({ t: 'dieta', data: oggi, patch: { integrazioneColazione: !g.integrazioneColazione } })}>
               Integr. colazione {g.integrazioneColazione ? '✓' : ''}
-            </button>
-            <button className={`pill ${g.integrazioneCena ? 'pill--on' : ''}`} style={{ flex: 1 }}
+            </button>}
+            {vista.integrazione.cena && <button className={`pill ${g.integrazioneCena ? 'pill--on' : ''}`} style={{ flex: 1 }}
               onClick={() => invia({ t: 'dieta', data: oggi, patch: { integrazioneCena: !g.integrazioneCena } })}>
               Integr. cena {g.integrazioneCena ? '✓' : ''}
-            </button>
+            </button>}
           </div>
           <div className="tiny" style={{ color: 'var(--dim)', marginTop: -8 }}>
-            Colazione: {INTEGRAZIONE.colazione} · Cena: {INTEGRAZIONE.cena}
+            {[vista.integrazione.colazione && `Colazione: ${vista.integrazione.colazione}`, vista.integrazione.cena && `Cena: ${vista.integrazione.cena}`].filter(Boolean).join(' · ')}
           </div>
+          </>}
 
           <div className="card row row--between">
             <div>
-              <span className="tiny kicker">Sgarri — uno ogni 15 giorni</span>
+              <span className="tiny kicker">{vista.sgarriOgni ? `Sgarri — uno ogni ${vista.sgarriOgni} giorni` : 'Sgarri'}</span>
               <div className="small" style={{ marginTop: 2 }}>
                 {giorniDaSgarro === null ? 'Nessuno registrato.'
                   : giorniDaSgarro === 0 ? 'Registrato oggi.'
@@ -258,7 +337,7 @@ function DietaSeed() {
             </button>
           </div>
 
-          <div className="card">
+          {vista.frequenze && <div className="card">
             <span className="tiny kicker">Frequenze della settimana</span>
             <div className="stack" style={{ gap: 6, marginTop: 8 }}>
               {FREQUENZE.map(f => {
@@ -279,14 +358,18 @@ function DietaSeed() {
                 )
               })}
             </div>
-          </div>
+          </div>}
 
-          <details>
+          {vista.regole.length > 0 && <details>
             <summary className="small fade-dim" style={{ cursor: 'pointer' }}>Regole del piano</summary>
             <ul className="small fade-dim" style={{ paddingLeft: 18, marginTop: 8 }}>
-              {REGOLE_DIETA.map((r, i) => <li key={i} style={{ marginBottom: 4 }}>{r}</li>)}
+              {vista.regole.map((r, i) => <li key={i} style={{ marginBottom: 4 }}>{r}</li>)}
             </ul>
-          </details>
+          </details>}
+          {vista.indicazioni && <details>
+            <summary className="small fade-dim" style={{ cursor: 'pointer' }}>Indicazioni del coach</summary>
+            <p className="small fade-dim" style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>{vista.indicazioni}</p>
+          </details>}
         </>
       )}
 
@@ -300,12 +383,7 @@ function DietaSeed() {
             </div>
             {pastoAperto.opzioni.map(o => {
               const scelta = g.pasti[pastoAperto.id] === o.n
-              const info = MACRO_OPZIONI[`${pastoAperto.id}-${o.n}`]
-              const mac = pastoAperto.id === 'cena' ? macroCena(o.n) : info?.macro
-              const assunzioni = [
-                ...(pastoAperto.id === 'cena' ? MACRO_OPZIONI['cena-base'].assunzioni : []),
-                ...(info?.assunzioni ?? []),
-              ]
+              const { macro: mac, assunzioni, ignote } = vista.stima(pastoAperto, o.n)
               return (
                 <button key={o.n} className="card" style={{ textAlign: 'left', borderColor: scelta ? 'var(--fire)' : 'var(--line-soft)' }}
                   onClick={() => {
@@ -320,9 +398,14 @@ function DietaSeed() {
                   </div>
                   <ul className="small fade-dim" style={{ paddingLeft: 16, marginTop: 4 }}>
                     {o.voci.map((v, i) => <li key={i}>{v}</li>)}
-                    {pastoAperto.id === 'cena' && <li style={{ color: 'var(--dim)' }}>+ base fissa (pane/riso, verdura, fondente)</li>}
+                    {vista.conBase(pastoAperto) && <li style={{ color: 'var(--dim)' }}>+ base fissa del pasto</li>}
                   </ul>
-                  {mac && <div style={{ marginTop: 8 }}><MacroRow macro={mac} /></div>}
+                  {mac
+                    ? <div style={{ marginTop: 8 }}><MacroRow macro={mac} /></div>
+                    : <div className="tiny fade-dim" style={{ marginTop: 6 }}>Macro non stimabili da queste righe</div>}
+                  {ignote.length > 0 && (
+                    <div className="tiny" style={{ color: 'var(--fire)', marginTop: 6 }}>Non riconosciuti: {ignote.join(' · ')}</div>
+                  )}
                   {assunzioni.length > 0 && (
                     <div className="tiny" style={{ color: 'var(--dim)', marginTop: 6 }}>* {assunzioni.join(' · ')}</div>
                   )}
@@ -338,31 +421,9 @@ function DietaSeed() {
   )
 }
 
-function DietaImportata() {
-  const { stato, invia } = useStore()
-  const piano = stato.pianiAlimentari.find(p => p.id === stato.pianoAlimentareId)!
-  const oggi = oggiISO()
-  const giorno = stato.dieta[oggi]
-  const [pasto, setPasto] = useState<Pasto | null>(null)
-  const [libera, setLibera] = useState(false)
-  const opzioni = piano.pasti.flatMap(p => { const o = p.opzioni.find(o => o.n === giorno?.pasti[p.id]); return o ? [o] : [] })
-  const macro = somma(...opzioni.flatMap(o => o.macro ? [o.macro] : []), ...(giorno?.libere ?? []).map(v => v.macro))
-  const incompleto = opzioni.some(o => !o.macro)
-  return <div className="screen stack" style={{ gap: 16 }}>
-    <header><span className="kicker">Il tuo piano alimentare</span><h1 className="display" style={{ fontSize: '2.4rem' }}>A tavola<span style={{ color: 'var(--fire)' }}>.</span></h1><p className="small fade-dim">{piano.nome} · {opzioni.length}/{piano.pasti.length} pasti scelti</p></header>
-    {piano.note && <details className="card"><summary>Indicazioni del coach</summary><p className="small" style={{ whiteSpace: 'pre-wrap' }}>{piano.note}</p></details>}
-    <div className="card"><span className="kicker">{incompleto ? 'Macro disponibili · totale parziale' : 'Macro registrati oggi'}</span><MacroRow macro={arrotonda(macro)} />{incompleto && <p className="tiny fade-dim">Alcune opzioni non riportano i macro nel PDF: non vengono stimati.</p>}</div>
-    {piano.pasti.map(p => {
-      const o = p.opzioni.find(o => o.n === giorno?.pasti[p.id])
-      return <button key={p.id} className={`card ${o ? 'card--fatta' : ''}`} style={{ textAlign: 'left' }} onClick={() => setPasto(p)}><b>{o ? '✓ ' : ''}{p.nome}</b><p className="small fade-dim">{o ? o.titolo || `Opzione ${o.n}` : `${p.opzioni.length} opzioni · scegli`}</p>{o && <p className="small">{o.voci.join(' · ')}</p>}</button>
-    })}
-    <section className="card stack"><div className="row row--between"><b>Alimenti aggiunti</b><button className="pill" onClick={() => setLibera(true)}>+ aggiungi</button></div>{giorno?.libere?.map((v, i) => <div key={i} className="row row--between"><span>{v.alimento} · {v.grammi} g</span><button className="pill" aria-label={`Rimuovi ${v.alimento}`} onClick={() => invia({ t: 'dieta-libera-rimuovi', data: oggi, indice: i })}>×</button></div>)}</section>
-    {pasto && <Sheet onClose={() => setPasto(null)}><div className="stack"><h2>{pasto.nome}</h2>{pasto.nota && <p className="small">{pasto.nota}</p>}{pasto.opzioni.map(o => <button key={o.n} className="card" style={{ textAlign: 'left' }} onClick={() => { invia({ t: 'dieta-pasto', data: oggi, pasto: pasto.id, opzione: giorno?.pasti[pasto.id] === o.n ? undefined : o.n }); setPasto(null) }}><b>{giorno?.pasti[pasto.id] === o.n ? '✓ ' : ''}Opzione {o.n}{o.titolo ? ` · ${o.titolo}` : ''}</b><ul>{o.voci.map((v, i) => <li key={i} className="small">{v}</li>)}</ul>{o.macro ? <MacroRow macro={o.macro} /> : <p className="tiny fade-dim">Macro non riportati nel documento</p>}</button>)}<button className="btn btn--ghost" onClick={() => setPasto(null)}>Chiudi</button></div></Sheet>}
-    {libera && <LiberaSheet data={oggi} onClose={() => setLibera(false)} />}
-  </div>
-}
-
 export default function Dieta() {
   const { stato } = useStore()
-  return stato.pianiAlimentari.some(p => p.id === stato.pianoAlimentareId) && !stato.profilo.dietaLibera ? <DietaImportata /> : <DietaSeed />
+  const piano = stato.pianiAlimentari.find(p => p.id === stato.pianoAlimentareId)
+  const vista = useMemo(() => piano && !stato.profilo.dietaLibera ? vistaImportata(piano) : VISTA_SALVATORE, [piano, stato.profilo.dietaLibera])
+  return <Tavola vista={vista} />
 }

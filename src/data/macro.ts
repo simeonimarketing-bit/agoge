@@ -37,6 +37,7 @@ export const ALIMENTI: Alimento[] = [
   { nome: 'Latte scremato', per100: m(34, 3.3, 5, 0.2, 0) },
   { nome: 'Latte proteico', per100: m(44, 6, 4.5, 0.5, 0) },
   { nome: 'Yogurt greco 0%', per100: m(57, 10, 4, 0.2, 0) },
+  { nome: 'Fiocchi di latte', per100: m(98, 11, 3.3, 4.5, 0) },
   { nome: 'Ricotta vaccina', per100: m(145, 11, 3.5, 10, 0) },
   { nome: 'Parmigiano', per100: m(390, 33, 0, 28, 0) },
   { nome: 'Uovo intero', per100: m(155, 12.5, 1, 11, 0) },
